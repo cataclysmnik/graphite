@@ -1,10 +1,9 @@
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QVBoxLayout, QLabel, QSlider,
+    QFrame, QHBoxLayout, QVBoxLayout, QLabel,
     QComboBox, QPushButton, QLineEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
-from widgets.knob import CustomKnob
 from widgets.level_meter import LevelMeter
 
 class TrackCard(QFrame):
@@ -115,46 +114,7 @@ class TrackCard(QFrame):
         
         main_layout.addLayout(details_layout)
         
-        # --- PANEL 2: Panning Knob ---
-        panning_layout = QVBoxLayout()
-        panning_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Custom Pan Knob
-        self.pan_knob = CustomKnob(
-            label="PAN",
-            min_val=-1.0,
-            max_val=1.0,
-            default_val=self.track.pan,
-            decimals=2
-        )
-        self.pan_knob.valueChanged.connect(self.on_pan_changed)
-        panning_layout.addWidget(self.pan_knob)
-        
-        main_layout.addLayout(panning_layout)
-        
-        # --- PANEL 3: Volume Fader ---
-        vol_layout = QVBoxLayout()
-        vol_layout.setSpacing(4)
-        vol_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.vol_slider = QSlider(Qt.Orientation.Vertical)
-        self.vol_slider.setMinimum(-600)  # -60.0 dB
-        self.vol_slider.setMaximum(60)    # +6.0 dB
-        self.vol_slider.setValue(int(self.track.volume * 10))
-        self.vol_slider.setObjectName("VolumeSlider")
-        self.vol_slider.valueChanged.connect(self.on_volume_changed)
-        vol_layout.addWidget(self.vol_slider)
-        
-        self.vol_label = QLabel("0.0 dB")
-        self.vol_label.setObjectName("VolDbLabel")
-        self.vol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.vol_label.setFont(QFont("Consolas", 8))
-        vol_layout.addWidget(self.vol_label)
-        self.update_volume_label(self.track.volume)
-        
-        main_layout.addLayout(vol_layout)
-        
-        # --- PANEL 4: Custom vertical LED VU Meter ---
+        # --- PANEL 2: Custom vertical LED VU Meter ---
         self.level_meter = LevelMeter()
         main_layout.addWidget(self.level_meter)
         
@@ -289,40 +249,6 @@ class TrackCard(QFrame):
                 border-radius: 9px;
             }
             
-            QSlider#VolumeSlider::groove:vertical {
-                background: #000000;
-                width: 4px;
-                border-radius: 2px;
-            }
-            QSlider#VolumeSlider::sub-page:vertical {
-                background: #000000;
-                width: 4px;
-                border-radius: 2px;
-            }
-            QSlider#VolumeSlider::add-page:vertical {
-                background: #ffffff;
-                width: 4px;
-                border-radius: 2px;
-            }
-            QSlider#VolumeSlider::handle:vertical {
-                background: #ffffff;
-                border: 1px solid #000000;
-                height: 18px;
-                width: 12px;
-                margin-left: -4px;
-                margin-right: -4px;
-                border-radius: 2px;
-            }
-            QSlider#VolumeSlider::handle:vertical:hover {
-                background: #ffffff;
-                border-color: #ff0033;
-            }
-            
-            QLabel#VolDbLabel {
-                color: #555558;
-                font-family: "Consolas", "Courier New", monospace;
-                font-size: 9px;
-            }
         """)
 
     def populate_inputs(self):

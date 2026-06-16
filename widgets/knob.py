@@ -1,6 +1,6 @@
 import math
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QPoint, Signal, QRectF
+from PySide6.QtCore import Qt, QPoint, QPointF, Signal, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QRadialGradient, QFont, QKeySequence
 
 class CustomKnob(QWidget):

@@ -14,6 +14,7 @@ from widgets.audio_settings import AudioSettingsDialog
 from widgets.timeline import TimelineScrollContainer
 from widgets.tuner import GuitarTunerWidget
 from widgets.metronome import GuitarMetronomeWidget
+from widgets.mixer import MixerWidget
 from widgets.signal_flow import SignalFlowWidget
 import project_manager
 
@@ -287,11 +288,21 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         # Bottom Dock: Tabbed Mixer, Tuner & Metronome Panel
         self.bottom_dock = QTabWidget()
         self.bottom_dock.setObjectName("BottomDockTabs")
+        self.bottom_dock.currentChanged.connect(self.on_tab_changed)
         
         # Instantiate effects rack and signal flow
         self.effects_rack = EffectsRack(self.audio_engine)
         self.signal_flow_widget = SignalFlowWidget(self.audio_engine, self.effects_rack)
         self.effects_rack.set_signal_flow_widget(self.signal_flow_widget)
+        
+        # Effects Tab — first in bottom dock
+        self.vst_settings_tab = QWidget()
+        vst_settings_layout = QVBoxLayout(self.vst_settings_tab)
+        vst_settings_layout.setContentsMargins(5, 5, 5, 5)
+        vst_settings_layout.setSpacing(5)
+        vst_settings_layout.addWidget(self.signal_flow_widget)
+        vst_settings_layout.addWidget(self.effects_rack)
+        self.bottom_dock.addTab(self.vst_settings_tab, "Effects")
         
         # Utilities Tab (Tuner and Metronome side-by-side)
         utility_widget = QWidget()
@@ -303,7 +314,6 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.tuner_widget = GuitarTunerWidget(self.audio_engine)
         utility_layout.addWidget(self.tuner_widget, 1)
         
-        # Subtle vertical separator line between them
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.VLine)
         separator.setFrameShadow(QFrame.Shadow.Sunken)
@@ -312,8 +322,12 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         self.metronome_widget = GuitarMetronomeWidget(self.audio_engine)
         utility_layout.addWidget(self.metronome_widget, 1)
-        
         self.bottom_dock.addTab(utility_widget, "Utilities")
+        
+        # Mixer Tab — last in bottom dock
+        self.mixer_widget = MixerWidget(self.audio_engine)
+        self.bottom_dock.addTab(self.mixer_widget, "Mixer")
+        self.mixer_widget.rebuild()
         
         main_splitter.addWidget(self.bottom_dock)
         
@@ -372,35 +386,10 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         size_grip = QSizeGrip(self)
         bottom_bar.addWidget(size_grip)
         
-        # Create Main Tab Widget
-        self.main_tabs = QTabWidget(self)
-        self.main_tabs.setObjectName("MainTabs")
-        self.main_tabs.currentChanged.connect(self.on_tab_changed)
-        
-        # Tab 1: Workspace
-        self.workspace_tab = QWidget()
-        workspace_tab_layout = QVBoxLayout(self.workspace_tab)
-        workspace_tab_layout.setContentsMargins(0, 0, 0, 0)
-        workspace_tab_layout.setSpacing(10)
-        workspace_tab_layout.addWidget(main_splitter)
-        workspace_tab_layout.addLayout(bottom_bar)
-        
-        self.main_tabs.addTab(self.workspace_tab, "WORKSPACE")
-        
-        # Tab 2: Effects & Signal Flow
-        self.vst_settings_tab = QWidget()
-        vst_settings_layout = QVBoxLayout(self.vst_settings_tab)
-        vst_settings_layout.setContentsMargins(10, 10, 10, 10)
-        vst_settings_layout.setSpacing(10)
-        
-        # Add drag-and-drop signal flow at the top
-        vst_settings_layout.addWidget(self.signal_flow_widget)
-        
-        # Add effects rack directly
-        vst_settings_layout.addWidget(self.effects_rack)
-        self.main_tabs.addTab(self.vst_settings_tab, "EFFECTS")
-        
-        content_layout.addWidget(self.main_tabs)
+
+        # Lay content out directly — no outer tab wrapper needed
+        content_layout.addWidget(main_splitter)
+        content_layout.addLayout(bottom_bar)
         main_layout.addWidget(content_widget)
         
         # --- FLAT GRAPHITE QSS STYLESHEET ---
@@ -703,7 +692,7 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
     def focus_fx_rack(self, track):
         """Forces selecting the track and highlighting the effects rack."""
         self.on_track_selected(track)
-        self.main_tabs.setCurrentIndex(1)
+        self.bottom_dock.setCurrentIndex(0)  # Effects tab is index 0
         
     def on_add_track(self):
         """Adds a track to audio engine and UI."""
@@ -721,6 +710,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         if hasattr(self, 'timeline'):
             self.timeline.update_track_layout()
+        if hasattr(self, 'mixer_widget'):
+            self.mixer_widget.rebuild()
         
     def on_track_removed(self, track):
         """Deletes a track from engine and UI."""
@@ -750,6 +741,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                     
             if hasattr(self, 'timeline'):
                 self.timeline.update_track_layout()
+            if hasattr(self, 'mixer_widget'):
+                self.mixer_widget.rebuild()
 
     def toggle_audio_stream(self):
         """Toggles the global sounddevice stream running state."""
@@ -1151,9 +1144,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.close_active_vst(switch_tab=False)
 
     def on_tab_changed(self, index):
-        if index == 0:
+        # Called when the bottom dock tabs switch.
+        # Close any open VST editor when leaving the Effects tab (index 1)
+        if index != 1:  # Not on Effects tab
             if self.active_vst_card:
-                self.close_active_vst()
+                self.close_active_vst(switch_tab=False)
 
     def show_themed_message_box(self, title, text, icon=QMessageBox.Icon.Information, buttons=QMessageBox.StandardButton.Ok):
         msg = QMessageBox(self)
