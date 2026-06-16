@@ -15,6 +15,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from widgets.main_window import MainWindow
+from widgets.splash import GraphiteSplashScreen
 
 def main():
     # Setup application properties
@@ -25,11 +26,19 @@ def main():
     # Initialize PySide Application
     app = QApplication(sys.argv)
     
+    # Create and show startup splash screen
+    splash = GraphiteSplashScreen()
+    splash.show()
+    app.processEvents()
+    
     # Create the DAW Main Window interface
-    window = MainWindow()
-    window.show()
+    window = MainWindow(splash=splash)
+    window.showMaximized()
     window.raise_()
     window.activateWindow()
+    
+    # Close the splash screen after the main window is fully loaded
+    splash.finish(window)
     
     # Run event loop
     sys.exit(app.exec())

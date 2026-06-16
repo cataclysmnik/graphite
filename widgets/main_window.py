@@ -16,15 +16,19 @@ import project_manager
 
 class MainWindow(QMainWindow):
     """Core Main Window for the Guitar DAW application."""
-    def __init__(self):
+    def __init__(self, splash=None):
         super().__init__()
         self.setWindowTitle("Graphite")
         self.setMinimumSize(950, 600)
         self.setObjectName("MainWindow")
         
+        if splash:
+            splash.set_status("Initializing Audio Engine...", 30)
         # Initialize Audio Engine
         self.audio_engine = AudioEngine()
         
+        if splash:
+            splash.set_status("Creating default tracks...", 50)
         # Add default track
         self.audio_engine.add_track("Lead Guitar")
         self.audio_engine.add_track("Rhythm Guitar")
@@ -32,6 +36,8 @@ class MainWindow(QMainWindow):
         self.track_cards = []
         self.selected_track = None
         
+        if splash:
+            splash.set_status("Building GUI widgets...", 70)
         self.setup_ui()
         
         # Select first track by default
@@ -43,9 +49,14 @@ class MainWindow(QMainWindow):
         self.master_timer.timeout.connect(self.update_master_levels)
         self.master_timer.start(33)
         
+        if splash:
+            splash.set_status("Starting Audio Stream...", 90)
         # Start the audio stream at startup automatically
         self.audio_engine.start_stream()
         self.update_stream_btn_style()
+        
+        if splash:
+            splash.set_status("Graphite ready!", 100)
         
     def setup_ui(self):
         # Main central widget
