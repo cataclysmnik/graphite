@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFileDialog, QSplitter, QSlider,
-    QMessageBox
+    QMessageBox, QTabWidget
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QAction, QKeySequence
@@ -12,6 +12,7 @@ from widgets.effects_rack import EffectsRack
 from widgets.level_meter import LevelMeter
 from widgets.audio_settings import AudioSettingsDialog
 from widgets.timeline import TimelineScrollContainer
+from widgets.tuner import GuitarTunerWidget
 import project_manager
 
 class MainWindow(QMainWindow):
@@ -176,12 +177,20 @@ class MainWindow(QMainWindow):
         self.timeline = TimelineScrollContainer(self.audio_engine, self)
         top_workspace.addWidget(self.timeline)
         
-        top_workspace.setSizes([250, 700])
+        top_workspace.setSizes([320, 680])
         main_splitter.addWidget(top_workspace)
         
-        # Bottom Panel: Effects Rack Mixer
+        # Bottom Dock: Tabbed Mixer & Tuner Panel
+        self.bottom_dock = QTabWidget()
+        self.bottom_dock.setObjectName("BottomDockTabs")
+        
         self.effects_rack = EffectsRack(self.audio_engine)
-        main_splitter.addWidget(self.effects_rack)
+        self.bottom_dock.addTab(self.effects_rack, "Effects Rack")
+        
+        self.tuner_widget = GuitarTunerWidget(self.audio_engine)
+        self.bottom_dock.addTab(self.tuner_widget, "Guitar Tuner")
+        
+        main_splitter.addWidget(self.bottom_dock)
         
         main_splitter.setSizes([450, 250])
         main_layout.addWidget(main_splitter)
@@ -239,6 +248,31 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("""
             QMainWindow#MainWindow {
                 background-color: #1e1e1e;
+            }
+            QTabWidget::pane {
+                border: 1px solid #333333;
+                background-color: #1e1e1e;
+            }
+            QTabBar::tab {
+                background-color: #252526;
+                color: #888888;
+                border: 1px solid #333333;
+                border-bottom-color: transparent;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 6px 15px;
+                font-family: "Segoe UI", sans-serif;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border-bottom-color: #1e1e1e;
+            }
+            QTabBar::tab:hover {
+                background-color: #2d2d2d;
+                color: #ffffff;
             }
             #CentralWidget {
                 background-color: #1e1e1e;
@@ -388,6 +422,7 @@ class MainWindow(QMainWindow):
     def on_track_selected(self, track):
         """Deselects other cards and selects this track."""
         self.selected_track = track
+        self.audio_engine.selected_track_id = track.track_id if track else None
         for card in self.track_cards:
             if card.track != track:
                 card.is_selected = False
@@ -441,6 +476,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.effects_rack.set_track(None)
                     self.selected_track = None
+                    self.audio_engine.selected_track_id = None
                     
             if hasattr(self, 'timeline'):
                 self.timeline.update_track_layout()
@@ -466,7 +502,7 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_status.setText("Audio Engine: STOPPED")
             
-        if hasattr(self, 'timeline') and hasattr(self.timeline, 'btn_play'):
+        if hasattr(self, 'timeline') and hasattr(self.timeline, 'btn_play_pause'):
             self.update_transport_ui()
 
     def toggle_demo_loop(self):
@@ -594,6 +630,12 @@ class MainWindow(QMainWindow):
             pass
         super().closeEvent(event)
 
+    def toggle_play_pause(self):
+        if self.audio_engine.play_state == "playing":
+            self.on_transport_pause()
+        else:
+            self.on_transport_play()
+
     def toggle_play_stop(self):
         if self.audio_engine.play_state == "playing":
             self.on_transport_stop()
@@ -634,16 +676,21 @@ class MainWindow(QMainWindow):
 
     def update_transport_ui(self):
         state = self.audio_engine.play_state
-        if not hasattr(self, 'timeline') or not hasattr(self.timeline, 'btn_play'):
+        if not hasattr(self, 'timeline') or not hasattr(self.timeline, 'btn_play_pause'):
             return
             
-        self.timeline.btn_play.setStyleSheet("")
-        self.timeline.btn_pause.setStyleSheet("")
+        self.timeline.btn_play_pause.setStyleSheet("")
         self.timeline.btn_record.setStyleSheet("")
         
         if state == "playing":
-            self.timeline.btn_play.setStyleSheet("background-color: #2b5a30; color: white;")
-        elif state == "paused":
-            self.timeline.btn_pause.setStyleSheet("background-color: #6b5317; color: white;")
-        elif state == "recording":
-            self.timeline.btn_record.setStyleSheet("background-color: #802b2b; color: white;")
+            self.timeline.btn_play_pause.setIcon(self.timeline.icon_pause)
+            self.timeline.btn_play_pause.setToolTip("Pause")
+            self.timeline.btn_play_pause.setStyleSheet("background-color: #2b5a30;")
+        else:
+            self.timeline.btn_play_pause.setIcon(self.timeline.icon_play)
+            self.timeline.btn_play_pause.setToolTip("Play")
+            if state == "paused":
+                self.timeline.btn_play_pause.setStyleSheet("background-color: #6b5317;")
+                
+        if state == "recording":
+            self.timeline.btn_record.setStyleSheet("background-color: #802b2b;")

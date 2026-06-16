@@ -105,6 +105,43 @@ def precompute_guitar_loop(sample_rate=44100):
     return loop_data
 
 
+class TunerBuffer:
+    """A thread-safe circular buffer for streaming input to the tuner."""
+    def __init__(self, size=8192):
+        self.size = size
+        self.buffer = np.zeros(size, dtype=np.float32)
+        self.write_ptr = 0
+        self.lock = threading.Lock()
+
+    def write(self, data):
+        if data is None or len(data) == 0:
+            return
+        with self.lock:
+            n = len(data)
+            if n > self.size:
+                data = data[-self.size:]
+                n = self.size
+            end = self.write_ptr + n
+            if end <= self.size:
+                self.buffer[self.write_ptr:end] = data
+            else:
+                first_part = self.size - self.write_ptr
+                self.buffer[self.write_ptr:] = data[:first_part]
+                self.buffer[:n - first_part] = data[first_part:]
+            self.write_ptr = (self.write_ptr + n) % self.size
+
+    def read_latest(self, n):
+        with self.lock:
+            if n > self.size:
+                n = self.size
+            start = (self.write_ptr - n) % self.size
+            end = self.write_ptr
+            if start < end:
+                return self.buffer[start:end].copy()
+            else:
+                return np.concatenate([self.buffer[start:], self.buffer[:end]])
+
+
 class AudioItem:
     """Represents an audio clip on the timeline."""
     def __init__(self, start_sample, sample_rate, file_path=None, audio_data=None):
@@ -250,6 +287,8 @@ class AudioEngine:
         self.guitar_loop_idx = 0
         self.vst_search_paths = ["C:\\Program Files\\Common Files\\VST3"]
         self.lock = threading.RLock()
+        self.tuner_buffer = TunerBuffer(8192)
+        self.selected_track_id = 1
         self.load_settings()
         
     def save_settings(self):
@@ -800,6 +839,10 @@ class AudioEngine:
                         
             if realtime_in is None:
                 realtime_in = np.zeros(frames, dtype=np.float32)
+                
+            # Write realtime_in to tuner circular buffer if track is armed and selected
+            if track.armed and track.track_id == self.selected_track_id:
+                self.tuner_buffer.write(realtime_in)
                 
             # If recording, append real-time input to recording buffers
             if is_recording_state and track.armed:

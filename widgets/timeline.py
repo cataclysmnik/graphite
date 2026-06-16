@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFileDialog, QMessageBox, QFrame,
     QPushButton, QLabel
 )
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint, QSize
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QIcon
 from audio_engine import AudioItem
 
 class TimeRulerWidget(QWidget):
@@ -575,16 +575,14 @@ class TimelineScrollContainer(QWidget):
             }
             QPushButton#TransportButton {
                 background-color: #2a2d32;
-                color: #e0e0e0;
                 border: 1px solid #3e4249;
                 border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 11px;
-                font-weight: bold;
+                padding: 4px 6px;
+                min-width: 28px;
+                min-height: 22px;
             }
             QPushButton#TransportButton:hover {
                 background-color: #3e4249;
-                color: #ffffff;
             }
         """)
         
@@ -592,26 +590,44 @@ class TimelineScrollContainer(QWidget):
         tb_layout.setContentsMargins(10, 4, 10, 4)
         tb_layout.setSpacing(8)
         
-        self.btn_stop = QPushButton("■ Stop")
+        # Resolve paths to public/icons
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        icons_dir = os.path.join(base_dir, "public", "icons")
+        
+        icon_stop = QIcon(os.path.join(icons_dir, "stop.svg"))
+        icon_play = QIcon(os.path.join(icons_dir, "play.svg"))
+        icon_pause = QIcon(os.path.join(icons_dir, "pause.svg"))
+        icon_record = QIcon(os.path.join(icons_dir, "record.svg"))
+        
+        icon_size = QSize(12, 12)
+        
+        self.btn_stop = QPushButton()
+        self.btn_stop.setIcon(icon_stop)
+        self.btn_stop.setIconSize(icon_size)
         self.btn_stop.setObjectName("TransportButton")
+        self.btn_stop.setToolTip("Stop")
         if self.main_window:
             self.btn_stop.clicked.connect(self.main_window.on_transport_stop)
         tb_layout.addWidget(self.btn_stop)
         
-        self.btn_play = QPushButton("▶ Play")
-        self.btn_play.setObjectName("TransportButton")
-        if self.main_window:
-            self.btn_play.clicked.connect(self.main_window.on_transport_play)
-        tb_layout.addWidget(self.btn_play)
+        # Store icons on the container so they can be switched dynamically
+        self.icon_play = icon_play
+        self.icon_pause = icon_pause
         
-        self.btn_pause = QPushButton("⏸ Pause")
-        self.btn_pause.setObjectName("TransportButton")
+        self.btn_play_pause = QPushButton()
+        self.btn_play_pause.setIcon(icon_play)
+        self.btn_play_pause.setIconSize(icon_size)
+        self.btn_play_pause.setObjectName("TransportButton")
+        self.btn_play_pause.setToolTip("Play")
         if self.main_window:
-            self.btn_pause.clicked.connect(self.main_window.on_transport_pause)
-        tb_layout.addWidget(self.btn_pause)
+            self.btn_play_pause.clicked.connect(self.main_window.toggle_play_pause)
+        tb_layout.addWidget(self.btn_play_pause)
         
-        self.btn_record = QPushButton("● Record")
+        self.btn_record = QPushButton()
+        self.btn_record.setIcon(icon_record)
+        self.btn_record.setIconSize(icon_size)
         self.btn_record.setObjectName("TransportButton")
+        self.btn_record.setToolTip("Record")
         if self.main_window:
             self.btn_record.clicked.connect(self.main_window.toggle_record)
         tb_layout.addWidget(self.btn_record)
