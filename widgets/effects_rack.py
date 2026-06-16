@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QScrollArea, QFileDialog, QSizePolicy, QMessageBox,
-    QMenu
+    QMenu, QDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor
@@ -12,6 +12,11 @@ from pedalboard import (
 )
 from audio_engine import EffectWrapper
 from widgets.knob import CustomKnob
+from theme_utils import FramelessWindowMixin, CustomTitleBar
+
+class VstDialog(FramelessWindowMixin, QDialog):
+    """Custom frameless wrapper dialog that supports native Win32 dragging and resizing."""
+    pass
 
 def scan_for_vst3s(search_paths):
     vst_list = []
@@ -264,7 +269,10 @@ class EffectCard(QFrame):
     @Slot(int, int)
     def _resize_vst_dialog(self, w, h):
         if hasattr(self, 'vst_dialog') and self.vst_dialog:
-            self.vst_dialog.setFixedSize(w, h)
+            self.vst_dialog.setFixedSize(w, h + 30)
+            title_bar = self.vst_dialog.findChild(QWidget, "CustomTitleBar")
+            if title_bar:
+                title_bar.setGeometry(0, 0, w, 30)
 
     def open_vst_editor(self):
         try:
@@ -278,7 +286,6 @@ class EffectCard(QFrame):
                 self.wrapper.effect.show_editor()
                 return
             
-            from PySide6.QtWidgets import QDialog
             from PySide6.QtCore import Qt
             import ctypes
             import ctypes.wintypes
@@ -293,20 +300,30 @@ class EffectCard(QFrame):
             user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
             user32.GetWindowLongPtrW.restype = ctypes.c_void_p
             
-            # Create a Qt Dialog to host the VST window
-            self.vst_dialog = QDialog(self)
+            # Create a VstDialog to host the VST window
+            self.vst_dialog = VstDialog(self)
+            self.vst_dialog.setObjectName("VstSettingsDialog")
             self.vst_dialog.setWindowTitle(f"{self.wrapper.name} Settings")
-            self.vst_dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
-            self.vst_dialog.resize(600, 400) # Initial size, will adapt
+            self.vst_dialog.setWindowFlags(Qt.Window)
+            self.vst_dialog.resize(600, 430) # Initial size + 30px for title bar
+            self.vst_dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #000000;
+                    border: 1px solid #222225;
+                }
+            """)
+            
+            # Add Custom Title Bar
+            title_bar = CustomTitleBar(self.vst_dialog, title_text=f"{self.wrapper.name} Settings", can_minimize=False)
+            title_bar.setObjectName("CustomTitleBar")
+            title_bar.setGeometry(0, 0, 600, 30)
+            title_bar.show()
+            
+            # Initialize native border resizing & dragging
+            self.vst_dialog.init_frameless(title_bar)
             
             # Show the dialog immediately
             self.vst_dialog.show()
-            
-            import sys
-            import os
-            sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-            from theme_utils import apply_dark_titlebar
-            apply_dark_titlebar(self.vst_dialog)
 
             # Restore previous position if we have one
             if hasattr(self.wrapper, '_last_editor_pos') and self.wrapper._last_editor_pos is not None:
@@ -416,11 +433,11 @@ class EffectCard(QFrame):
                 # Embed inside the QDialog
                 user32.SetParent(root, dialog_hwnd)
                 
-                # Position it perfectly inside the QDialog client area
+                # Position it perfectly inside the QDialog client area (starting at y=30)
                 SWP_NOZORDER = 0x0004
                 SWP_FRAMECHANGED = 0x0020
                 SWP_SHOWWINDOW = 0x0040
-                user32.SetWindowPos(root, 0, 0, 0, w, h, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW)
+                user32.SetWindowPos(root, 0, 0, 30, w, h, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW)
                 
                 # Lock the Qt Dialog strictly to the VST's internal size
                 from PySide6.QtCore import QMetaObject, Qt, Q_ARG

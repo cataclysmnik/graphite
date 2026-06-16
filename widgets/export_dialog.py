@@ -5,7 +5,8 @@ import subprocess
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QPushButton, QFormLayout, QDialogButtonBox, QMessageBox,
-    QGroupBox, QRadioButton, QDoubleSpinBox, QLineEdit, QFileDialog, QProgressBar
+    QGroupBox, QRadioButton, QDoubleSpinBox, QLineEdit, QFileDialog, QProgressBar,
+    QWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
@@ -40,7 +41,9 @@ class ExportWorker(QThread):
         self.finished.emit(success, message)
 
 
-class ExportDialog(QDialog):
+from theme_utils import FramelessWindowMixin
+
+class ExportDialog(FramelessWindowMixin, QDialog):
     """Settings dialog for configuring and executing timeline audio exports."""
     def __init__(self, audio_engine, parent=None):
         super().__init__(parent)
@@ -51,20 +54,28 @@ class ExportDialog(QDialog):
         self.setMinimumSize(480, 440)
         self.setObjectName("ExportDialog")
         
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        from theme_utils import apply_dark_titlebar
-        apply_dark_titlebar(self)
-        
         self.setup_ui()
+        self.init_frameless(self.title_bar)
         self.calculate_project_length()
         self.load_export_settings()
         
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Add Custom Title Bar
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from theme_utils import CustomTitleBar
+        self.title_bar = CustomTitleBar(self, title_text="EXPORT AUDIO (RENDER)", can_minimize=False)
+        main_layout.addWidget(self.title_bar)
+        
+        content_widget = QWidget(self)
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(15, 15, 15, 15)
+        content_layout.setSpacing(12)
         
         # --- Group 1: Output File path ---
         path_group = QGroupBox("Output File")
@@ -81,7 +92,7 @@ class ExportDialog(QDialog):
         btn_browse.setObjectName("BrowseButton")
         btn_browse.clicked.connect(self.on_browse)
         path_layout.addWidget(btn_browse)
-        main_layout.addWidget(path_group)
+        content_layout.addWidget(path_group)
         
         # --- Group 2: Render Settings ---
         settings_group = QGroupBox("Format Settings")
@@ -116,7 +127,7 @@ class ExportDialog(QDialog):
         self.combo_channels.addItem("Mono", "mono")
         settings_layout.addRow(QLabel("Channels:"), self.combo_channels)
         
-        main_layout.addWidget(settings_group)
+        content_layout.addWidget(settings_group)
         
         # --- Group 3: Export Range ---
         range_group = QGroupBox("Render Bounds")
@@ -156,7 +167,7 @@ class ExportDialog(QDialog):
         bounds_layout.addWidget(self.spin_end)
         
         range_layout.addWidget(self.bounds_widget)
-        main_layout.addWidget(range_group)
+        content_layout.addWidget(range_group)
         
         # --- Progress Bar (Hidden by default) ---
         self.progress_bar = QProgressBar()
@@ -164,7 +175,7 @@ class ExportDialog(QDialog):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
         self.progress_bar.setObjectName("ExportProgress")
-        main_layout.addWidget(self.progress_bar)
+        content_layout.addWidget(self.progress_bar)
         
         # --- Dialog Action Buttons ---
         self.button_box = QDialogButtonBox()
@@ -181,7 +192,9 @@ class ExportDialog(QDialog):
         self.btn_render.clicked.connect(self.start_render)
         self.btn_open_folder.clicked.connect(self.open_export_folder)
         self.btn_close.clicked.connect(self.reject)
-        main_layout.addWidget(self.button_box)
+        content_layout.addWidget(self.button_box)
+        
+        main_layout.addWidget(content_widget)
         
         self.toggle_range_inputs()
         
@@ -189,6 +202,7 @@ class ExportDialog(QDialog):
         self.setStyleSheet("""
             QDialog {
                 background-color: #000000;
+                border: 1px solid #222225;
             }
             QGroupBox {
                 border: 1px solid #333333;

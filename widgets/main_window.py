@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFileDialog, QSplitter, QSlider,
-    QMessageBox, QTabWidget, QFrame
+    QMessageBox, QTabWidget, QFrame, QMenuBar, QSizeGrip
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QAction, QKeySequence
@@ -16,7 +16,9 @@ from widgets.tuner import GuitarTunerWidget
 from widgets.metronome import GuitarMetronomeWidget
 import project_manager
 
-class MainWindow(QMainWindow):
+from theme_utils import FramelessWindowMixin
+
+class MainWindow(FramelessWindowMixin, QMainWindow):
     """Core Main Window for the Guitar DAW application."""
     def __init__(self, splash=None):
         super().__init__()
@@ -41,6 +43,7 @@ class MainWindow(QMainWindow):
         if splash:
             splash.set_status("Building GUI widgets...", 70)
         self.setup_ui()
+        self.init_frameless(self.title_bar)
         
         # Select first track by default
         if self.track_cards:
@@ -67,11 +70,23 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Custom Title Bar
+        from theme_utils import CustomTitleBar
+        self.title_bar = CustomTitleBar(self, title_text="GRAPHITE", can_maximize=True, can_minimize=True)
+        main_layout.addWidget(self.title_bar)
         
         # --- 1. GLOBAL TOP MENU BAR ---
-        menu_bar = self.menuBar()
+        menu_bar = QMenuBar(self)
+        main_layout.addWidget(menu_bar)
+        
+        # Main workspace content container
+        content_widget = QWidget(self)
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(10, 10, 10, 10)
+        content_layout.setSpacing(10)
         
         # File Menu
         file_menu = menu_bar.addMenu("File")
@@ -213,7 +228,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.bottom_dock)
         
         main_splitter.setSizes([450, 250])
-        main_layout.addWidget(main_splitter)
+        content_layout.addWidget(main_splitter)
         
         # Synchronize vertical scrolls
         self.tracks_scroll.verticalScrollBar().valueChanged.connect(self.timeline.scroll_area.verticalScrollBar().setValue)
@@ -262,7 +277,12 @@ class MainWindow(QMainWindow):
         self.master_level_meter.setMaximumHeight(65)
         bottom_bar.addWidget(self.master_level_meter)
         
-        main_layout.addLayout(bottom_bar)
+        # Size grip for frameless resizing
+        size_grip = QSizeGrip(self)
+        bottom_bar.addWidget(size_grip)
+        
+        content_layout.addLayout(bottom_bar)
+        main_layout.addWidget(content_widget)
         
         # --- FLAT GRAPHITE QSS STYLESHEET ---
         self.setStyleSheet("""
@@ -296,6 +316,7 @@ class MainWindow(QMainWindow):
             }
             #CentralWidget {
                 background-color: #0b0b0c;
+                border: 1px solid #222225;
             }
             QLabel {
                 color: #e2e2e5;

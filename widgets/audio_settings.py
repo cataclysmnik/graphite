@@ -8,7 +8,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-class AudioSettingsDialog(QDialog):
+from theme_utils import FramelessWindowMixin
+
+class AudioSettingsDialog(FramelessWindowMixin, QDialog):
     """Dialog for configuring advanced Reaper-style audio device settings."""
     def __init__(self, audio_engine, parent=None):
         super().__init__(parent)
@@ -18,19 +20,27 @@ class AudioSettingsDialog(QDialog):
         self.setMinimumSize(520, 640)
         self.setObjectName("AudioSettingsDialog")
         
-        import sys
-        import os
-        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-        from theme_utils import apply_dark_titlebar
-        apply_dark_titlebar(self)
-        
         self.setup_ui()
+        self.init_frameless(self.title_bar)
         self.load_settings()
         
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Add Custom Title Bar
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from theme_utils import CustomTitleBar
+        self.title_bar = CustomTitleBar(self, title_text="AUDIO DEVICE SETTINGS", can_minimize=False)
+        main_layout.addWidget(self.title_bar)
+        
+        content_widget = QWidget(self)
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(15, 15, 15, 15)
+        content_layout.setSpacing(12)
         
         # --- AUDIO DEVICE SETTINGS GROUP BOX ---
         group_box = QGroupBox("Audio device settings")
@@ -195,7 +205,7 @@ class AudioSettingsDialog(QDialog):
         self.chk_ignore_reset.setChecked(True)
         group_layout.addWidget(self.chk_ignore_reset)
         
-        main_layout.addWidget(group_box)
+        content_layout.addWidget(group_box)
         
         # --- BOTTOM SETTINGS ---
         bottom_row = QHBoxLayout()
@@ -210,11 +220,11 @@ class AudioSettingsDialog(QDialog):
         self.combo_priority.setObjectName("PriorityCombo")
         bottom_row.addWidget(self.combo_priority)
         bottom_row.addStretch()
-        main_layout.addLayout(bottom_row)
+        content_layout.addLayout(bottom_row)
         
         self.chk_override_sr = QCheckBox("Allow projects to override device sample rate")
         self.chk_override_sr.setChecked(True)
-        main_layout.addWidget(self.chk_override_sr)
+        content_layout.addWidget(self.chk_override_sr)
         
         # --- VST PLUGIN SEARCH PATHS GROUP BOX ---
         vst_group = QGroupBox("VST plug-in search paths")
@@ -240,7 +250,7 @@ class AudioSettingsDialog(QDialog):
         vst_btn_layout.addStretch()
         
         vst_layout.addLayout(vst_btn_layout)
-        main_layout.addWidget(vst_group)
+        content_layout.addWidget(vst_group)
 
         # OK / CANCEL BUTTONS
         self.button_box = QDialogButtonBox(
@@ -248,13 +258,16 @@ class AudioSettingsDialog(QDialog):
         )
         self.button_box.accepted.connect(self.on_accept)
         self.button_box.rejected.connect(self.reject)
-        main_layout.addWidget(self.button_box)
+        content_layout.addWidget(self.button_box)
+        
+        main_layout.addWidget(content_widget)
         
         # Stylesheet styling to match Nothing design aesthetic
         self.setStyleSheet("""
             QDialog#AudioSettingsDialog {
                 background-color: #000000;
                 color: #ffffff;
+                border: 1px solid #222225;
             }
             QGroupBox#SettingsGroupBox {
                 border: 1px solid #333333;
