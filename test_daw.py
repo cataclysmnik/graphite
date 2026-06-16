@@ -101,6 +101,94 @@ def test_daw_serialization():
         
     print("SUCCESS: All serialization and deserialization assertions passed (including timeline AudioItems)!")
 
+def test_daw_export():
+    print("Initializing export test...")
+    engine = AudioEngine()
+    engine.stop_stream()
+    
+    # 1. Clear default tracks
+    engine.tracks.clear()
+    
+    # 2. Add track and mock item
+    track = engine.add_track("Lead Guitar")
+    
+    test_wav_path = "test_export_input.wav"
+    sample_rate = 44100
+    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    sine = np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
+    stereo_data = np.stack([sine, sine]) # shape (2, 44100)
+    
+    item = AudioItem(start_sample=0, sample_rate=sample_rate, file_path=test_wav_path, audio_data=stereo_data)
+    item.save_to_wav(test_wav_path)
+    track.items.append(item)
+    
+    # 3. Test 16-bit Stereo Export
+    export_16_path = "test_export_out_16.wav"
+    print(f"Exporting to 16-bit WAV: {export_16_path}...")
+    success, msg = engine.render_project_offline(
+        file_path=export_16_path,
+        start_time_sec=0.0,
+        end_time_sec=1.0,
+        sample_rate=sample_rate,
+        bit_depth=16,
+        channels="stereo"
+    )
+    assert success, f"16-bit export failed: {msg}"
+    assert os.path.exists(export_16_path), "16-bit export file not found on disk"
+    
+    # Verify 16-bit file properties
+    import wave
+    with wave.open(export_16_path, 'rb') as w:
+        assert w.getnchannels() == 2, f"Expected 2 channels, got {w.getnchannels()}"
+        assert w.getsampwidth() == 2, f"Expected 2 bytes per sample (16-bit), got {w.getsampwidth()}"
+        assert w.getframerate() == 44100, f"Expected 44100 Hz, got {w.getframerate()}"
+        assert w.getnframes() == 44100, f"Expected 44100 frames, got {w.getnframes()}"
+        
+    # 4. Test 24-bit Stereo Export
+    export_24_path = "test_export_out_24.wav"
+    print(f"Exporting to 24-bit WAV: {export_24_path}...")
+    success, msg = engine.render_project_offline(
+        file_path=export_24_path,
+        start_time_sec=0.0,
+        end_time_sec=1.0,
+        sample_rate=sample_rate,
+        bit_depth=24,
+        channels="stereo"
+    )
+    assert success, f"24-bit export failed: {msg}"
+    assert os.path.exists(export_24_path), "24-bit export file not found on disk"
+    
+    # Verify 24-bit file properties
+    with wave.open(export_24_path, 'rb') as w:
+        assert w.getnchannels() == 2, f"Expected 2 channels, got {w.getnchannels()}"
+        assert w.getsampwidth() == 3, f"Expected 3 bytes per sample (24-bit), got {w.getsampwidth()}"
+        assert w.getframerate() == 44100, f"Expected 44100 Hz, got {w.getframerate()}"
+        assert w.getnframes() == 44100, f"Expected 44100 frames, got {w.getnframes()}"
+        
+    # 5. Test MP3 Stereo Export
+    export_mp3_path = "test_export_out.mp3"
+    print(f"Exporting to MP3: {export_mp3_path}...")
+    success, msg = engine.render_project_offline(
+        file_path=export_mp3_path,
+        start_time_sec=0.0,
+        end_time_sec=1.0,
+        sample_rate=sample_rate,
+        bit_depth=16,
+        channels="stereo",
+        format_type="mp3"
+    )
+    assert success, f"MP3 export failed: {msg}"
+    assert os.path.exists(export_mp3_path), "MP3 export file not found on disk"
+    assert os.path.getsize(export_mp3_path) > 0, "MP3 file is empty"
+    
+    # Cleanup
+    for path in [test_wav_path, export_16_path, export_24_path, export_mp3_path]:
+        if os.path.exists(path):
+            os.remove(path)
+            
+    print("SUCCESS: All export and offline mixdown rendering assertions passed!")
+
 if __name__ == "__main__":
     test_daw_serialization()
+    test_daw_export()
 

@@ -78,6 +78,11 @@ class MainWindow(QMainWindow):
         self.action_save.triggered.connect(self.on_save_project)
         file_menu.addAction(self.action_save)
         
+        self.action_export = QAction("Export Audio...", self)
+        self.action_export.setShortcut(QKeySequence("Ctrl+E"))
+        self.action_export.triggered.connect(self.on_export_audio)
+        file_menu.addAction(self.action_export)
+        
         file_menu.addSeparator()
         
         self.action_exit = QAction("Exit", self)
@@ -188,27 +193,6 @@ class MainWindow(QMainWindow):
         bottom_bar.addWidget(self.lbl_status)
         
         bottom_bar.addSpacing(20)
-        
-        # Transport Buttons
-        self.btn_stop = QPushButton("■ Stop")
-        self.btn_stop.setObjectName("TransportButton")
-        self.btn_stop.clicked.connect(self.on_transport_stop)
-        bottom_bar.addWidget(self.btn_stop)
-        
-        self.btn_play = QPushButton("▶ Play")
-        self.btn_play.setObjectName("TransportButton")
-        self.btn_play.clicked.connect(self.on_transport_play)
-        bottom_bar.addWidget(self.btn_play)
-        
-        self.btn_pause = QPushButton("⏸ Pause")
-        self.btn_pause.setObjectName("TransportButton")
-        self.btn_pause.clicked.connect(self.on_transport_pause)
-        bottom_bar.addWidget(self.btn_pause)
-        
-        self.btn_record = QPushButton("● Record")
-        self.btn_record.setObjectName("TransportButton")
-        self.btn_record.clicked.connect(self.toggle_record)
-        bottom_bar.addWidget(self.btn_record)
         
         bottom_bar.addStretch()
         
@@ -471,7 +455,7 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_status.setText("Audio Engine: STOPPED")
             
-        if hasattr(self, 'btn_play'):
+        if hasattr(self, 'timeline') and hasattr(self.timeline, 'btn_play'):
             self.update_transport_ui()
 
     def toggle_demo_loop(self):
@@ -553,6 +537,12 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.critical(self, "Save Error", "Failed to save project file.")
  
+    def on_export_audio(self):
+        """Opens the export settings dialog to render timeline mixdown to file."""
+        from widgets.export_dialog import ExportDialog
+        dlg = ExportDialog(self.audio_engine, self)
+        dlg.exec()
+ 
     def on_load_project(self):
         """Loads session file and rebuilds cards UI."""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -609,6 +599,9 @@ class MainWindow(QMainWindow):
         self.audio_engine.pause_playback()
         self.update_transport_ui()
         self.update_stream_btn_style()
+        if hasattr(self, 'timeline'):
+            self.timeline.update_widgets()
+            self.timeline.update_track_layout()
         
     def on_transport_stop(self):
         self.audio_engine.stop_playback()
@@ -625,13 +618,16 @@ class MainWindow(QMainWindow):
 
     def update_transport_ui(self):
         state = self.audio_engine.play_state
-        self.btn_play.setStyleSheet("")
-        self.btn_pause.setStyleSheet("")
-        self.btn_record.setStyleSheet("")
+        if not hasattr(self, 'timeline') or not hasattr(self.timeline, 'btn_play'):
+            return
+            
+        self.timeline.btn_play.setStyleSheet("")
+        self.timeline.btn_pause.setStyleSheet("")
+        self.timeline.btn_record.setStyleSheet("")
         
         if state == "playing":
-            self.btn_play.setStyleSheet("background-color: #2b5a30; color: white;")
+            self.timeline.btn_play.setStyleSheet("background-color: #2b5a30; color: white;")
         elif state == "paused":
-            self.btn_pause.setStyleSheet("background-color: #6b5317; color: white;")
+            self.timeline.btn_pause.setStyleSheet("background-color: #6b5317; color: white;")
         elif state == "recording":
-            self.btn_record.setStyleSheet("background-color: #802b2b; color: white;")
+            self.timeline.btn_record.setStyleSheet("background-color: #802b2b; color: white;")

@@ -241,7 +241,7 @@ class AudioEngine:
         self.guitar_loop = precompute_guitar_loop(self.sample_rate)
         self.guitar_loop_idx = 0
         self.vst_search_paths = ["C:\\Program Files\\Common Files\\VST3"]
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.load_settings()
         
     def save_settings(self):
@@ -487,10 +487,13 @@ class AudioEngine:
 
     def pause_playback(self):
         """Pauses the playhead progression."""
+        was_recording = False
         with self.lock:
             if self.play_state == "recording":
-                self.stop_recording()
+                was_recording = True
             self.play_state = "paused"
+        if was_recording:
+            self.stop_recording_data()
 
     def stop_playback(self):
         """Stops playback, resets playhead to start (0.0s)."""
@@ -527,27 +530,43 @@ class AudioEngine:
     def stop_recording_data(self):
         """Appends recorded blocks to respective track items and saves WAVs."""
         import uuid
+        
+        # 1. Safely extract and clear the buffers under the engine lock
+        buffers_to_process = []
+        start_sample = 0
+        sr = 44100
+        
         with self.lock:
+            start_sample = self.recording_start_sample
+            sr = self.sample_rate
             for track_id, buffers in list(self.recording_buffers.items()):
                 if not buffers:
                     continue
+                track = next((t for t in self.tracks if t.track_id == track_id), None)
+                if track:
+                    # Copy the buffers list and clear it from engine
+                    buffers_to_process.append((track, list(buffers)))
+            self.recording_buffers.clear()
+            
+        # 2. Process and perform disk I/O outside the engine lock
+        for track, buffers in buffers_to_process:
+            try:
                 recorded_audio = np.concatenate(buffers)
                 audio_2d = np.reshape(recorded_audio, (1, -1))
                 
-                start_sample = self.recording_start_sample
-                filename = f"recorded_track_{track_id}_{uuid.uuid4().hex[:6]}.wav"
+                filename = f"recorded_track_{track.track_id}_{uuid.uuid4().hex[:6]}.wav"
                 file_path = os.path.join(os.getcwd(), filename)
                 
-                track = next((t for t in self.tracks if t.track_id == track_id), None)
-                if track:
-                    item = AudioItem(start_sample, self.sample_rate, file_path=file_path, audio_data=audio_2d)
-                    try:
-                        item.save_to_wav(file_path)
-                    except Exception as e:
-                        print(f"Failed to save recorded WAV: {e}")
-                    with track.lock:
-                        track.items.append(item)
-            self.recording_buffers.clear()
+                item = AudioItem(start_sample, sr, file_path=file_path, audio_data=audio_2d)
+                try:
+                    item.save_to_wav(file_path)
+                except Exception as e:
+                    print(f"Failed to save recorded WAV: {e}")
+                
+                with track.lock:
+                    track.items.append(item)
+            except Exception as e:
+                print(f"Error processing recorded data for Track {track.name}: {e}")
 
     def add_track(self, name=None):
         """Adds a track to the engine and returns it."""
@@ -563,6 +582,146 @@ class AudioEngine:
         """Removes a track by its ID."""
         with self.lock:
             self.tracks = [t for t in self.tracks if t.track_id != track_id]
+            
+    def render_project_offline(self, file_path, start_time_sec, end_time_sec, sample_rate, bit_depth, channels="stereo", format_type="wav", progress_callback=None):
+        """Renders the timeline project to a WAV or MP3 file offline (faster than real-time)."""
+        import soundfile as sf
+        import numpy as np
+        
+        # Calculate sample ranges
+        start_sample = int(start_time_sec * sample_rate)
+        end_sample = int(end_time_sec * sample_rate)
+        total_samples = end_sample - start_sample
+        if total_samples <= 0:
+            return False, "Invalid time range."
+            
+        # Define block size for render
+        block_size = 512
+        
+        # We need a copy of the tracks to prevent lock contention
+        with self.lock:
+            tracks_copy = list(self.tracks)
+            
+        try:
+            channels_count = 2 if channels == "stereo" else 1
+            
+            # Determine format and subtype for soundfile
+            sf_format = 'WAV'
+            sf_subtype = 'PCM_16'
+            
+            if format_type == "mp3":
+                sf_format = 'MP3'
+                sf_subtype = None
+            else:
+                sf_format = 'WAV'
+                if bit_depth == 24:
+                    sf_subtype = 'PCM_24'
+                else:
+                    sf_subtype = 'PCM_16'
+            
+            with sf.SoundFile(file_path, mode='w', samplerate=sample_rate, channels=channels_count, format=sf_format, subtype=sf_subtype) as sf_file:
+                # Render loop
+                curr_sample = start_sample
+                
+                # We want to display progress
+                while curr_sample < end_sample:
+                    frames = min(block_size, end_sample - curr_sample)
+                    
+                    # Output block accumulator
+                    mixed_block = np.zeros((frames, 2), dtype=np.float32)
+                    
+                    # Render each track
+                    for track in tracks_copy:
+                        if track.mute:
+                            continue
+                            
+                        # Fetch track items playback
+                        track_playback = np.zeros(frames, dtype=np.float32)
+                        with track.lock:
+                            items = list(track.items)
+                            
+                        for item in items:
+                            if item.audio_data is None:
+                                continue
+                                
+                            # Convert item samples to target sample rate
+                            item_start = int((item.start_sample / item.sample_rate) * sample_rate)
+                            item_len = int((item.audio_data.shape[1] / item.sample_rate) * sample_rate)
+                            item_end = item_start + item_len
+                            
+                            # Check overlap with current render block
+                            overlap_start = max(curr_sample, item_start)
+                            overlap_end = min(curr_sample + frames, item_end)
+                            
+                            if overlap_start < overlap_end:
+                                # Slices
+                                read_start = overlap_start - item_start
+                                read_end = overlap_end - item_start
+                                write_offset = overlap_start - curr_sample
+                                length = overlap_end - overlap_start
+                                
+                                # Resample the sub-segment of item.audio_data to target sample rate
+                                orig_start = int((read_start / sample_rate) * item.sample_rate)
+                                orig_end = int((read_end / sample_rate) * item.sample_rate)
+                                orig_chunk = item.audio_data[0, orig_start:orig_end]
+                                
+                                if len(orig_chunk) > 0:
+                                    # Resample orig_chunk to length
+                                    orig_indices = np.arange(len(orig_chunk))
+                                    target_indices = np.linspace(0, len(orig_chunk) - 1, length)
+                                    resampled_chunk = np.interp(target_indices, orig_indices, orig_chunk)
+                                    track_playback[write_offset : write_offset + length] += resampled_chunk
+                                    
+                        # Process through track pedalboard
+                        pedalboard_in = np.reshape(track_playback, (1, -1)).astype(np.float32)
+                        try:
+                            # Run pedalboard (at target sample rate)
+                            pedalboard_out = track.pedalboard(pedalboard_in, sample_rate, reset=False)
+                        except Exception as e:
+                            print(f"Pedalboard offline render error: {e}")
+                            pedalboard_out = np.zeros((1, frames), dtype=np.float32)
+                            
+                        # Reshape to stereo
+                        out_ch = pedalboard_out.shape[0]
+                        if out_ch == 1:
+                            left = pedalboard_out[0, :]
+                            right = pedalboard_out[0, :]
+                        else:
+                            left = pedalboard_out[0, :]
+                            right = pedalboard_out[1, :]
+                            
+                        # Apply volume & pan
+                        vol_gain = 10.0 ** (track.volume / 20.0)
+                        g_l = np.cos(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
+                        g_r = np.sin(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
+                        
+                        mixed_block[:, 0] += left * g_l
+                        mixed_block[:, 1] += right * g_r
+                        
+                    # Apply main volume
+                    main_gain = 10.0 ** (self.main_volume / 20.0)
+                    mixed_block *= main_gain
+                    
+                    # Clip output
+                    np.clip(mixed_block, -1.0, 1.0, out=mixed_block)
+                    
+                    # Output mono or stereo
+                    if channels == "mono":
+                        mono_data = 0.5 * (mixed_block[:, 0] + mixed_block[:, 1])
+                        interleaved = mono_data
+                    else:
+                        interleaved = mixed_block
+                        
+                    # Write block via soundfile
+                    sf_file.write(interleaved)
+                        
+                    curr_sample += frames
+                    if progress_callback:
+                        progress_callback(int((curr_sample - start_sample) / total_samples * 100))
+                        
+            return True, "Export successful!"
+        except Exception as e:
+            return False, f"Failed during render: {e}"
             
     def _duplex_callback(self, indata, outdata, frames, time, status):
         """Callback for full-duplex audio processing. Console printing is omitted for latency stability."""

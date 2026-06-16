@@ -3,7 +3,8 @@ import wave
 import uuid
 import numpy as np
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFileDialog, QMessageBox, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFileDialog, QMessageBox, QFrame,
+    QPushButton, QLabel
 )
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont
@@ -171,9 +172,15 @@ class TimelineLanesWidget(QWidget):
         max_sec = 300.0  # Default 5 minutes
         for track in self.audio_engine.tracks:
             for item in track.items:
-                item_end = (item.start_sample + (item.audio_data.shape[1] if item.audio_data is not None else 0)) / item.sample_rate
-                max_sec = max(max_sec, item_end + 15.0)  # Pad with 15s
+                if item.audio_data is not None:
+                    item_end = (item.start_sample + item.audio_data.shape[1]) / item.sample_rate
+                    max_sec = max(max_sec, item_end + 15.0)  # Pad with 15s
                 
+        # Make sure the width expands to cover the current playhead + padding
+        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+        playhead_sec = self.audio_engine.playhead_samples / sr
+        max_sec = max(max_sec, playhead_sec + 30.0)
+        
         w = int(max_sec * self.pixels_per_second)
         self.resize(w, h)
         self.update()
@@ -320,10 +327,35 @@ class TimelineLanesWidget(QWidget):
             with track.lock:
                 items_copy = list(track.items)
                 
-            for item in items_copy:
+            # Prepare live recording item if track is recording
+            is_recording = (self.audio_engine.play_state == "recording")
+            live_item = None
+            if is_recording and track.armed:
+                with self.audio_engine.lock:
+                    buffers = self.audio_engine.recording_buffers.get(track.track_id)
+                    if buffers and len(buffers) > 0:
+                        try:
+                            live_data = np.concatenate(buffers)
+                            live_audio_data = np.reshape(live_data, (1, -1))
+                            live_item = AudioItem(
+                                start_sample=self.audio_engine.recording_start_sample,
+                                sample_rate=self.audio_engine.sample_rate,
+                                file_path=None,
+                                audio_data=live_audio_data
+                            )
+                        except Exception as e:
+                            print(f"Error drawing live recording: {e}")
+                            
+            items_to_draw = list(items_copy)
+            if live_item is not None:
+                items_to_draw.append(live_item)
+                
+            for item in items_to_draw:
                 if item.audio_data is None:
                     continue
                     
+                is_live = (item is live_item)
+                
                 # Calculate coordinates
                 item_len = item.audio_data.shape[1]
                 start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
@@ -332,7 +364,10 @@ class TimelineLanesWidget(QWidget):
                 
                 # Draw clip block background
                 clip_rect = QRectF(start_x, y_top, item_width, draw_h)
-                if item == self.selected_item:
+                if is_live:
+                    painter.setBrush(QBrush(QColor("#452525")))
+                    painter.setPen(QPen(QColor("#a84444"), 1.2))
+                elif item == self.selected_item:
                     painter.setBrush(QBrush(QColor("#404854")))
                     painter.setPen(QPen(QColor("#ffffff"), 2.0))
                 else:
@@ -343,15 +378,23 @@ class TimelineLanesWidget(QWidget):
                 # Draw WAV Filename text label
                 font = QFont("Segoe UI", 7, QFont.Weight.Bold)
                 painter.setFont(font)
-                painter.setPen(QColor("#a0b0c0"))
-                name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
+                if is_live:
+                    painter.setPen(QColor("#e8a0a0"))
+                    name_str = "Recording Live..."
+                else:
+                    painter.setPen(QColor("#a0b0c0"))
+                    name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
+                
                 # Clip text to container width
                 metrics = painter.fontMetrics()
                 elided_str = metrics.elidedText(name_str, Qt.TextElideMode.ElideRight, int(item_width - 10))
                 painter.drawText(start_x + 5, y_top + 12, elided_str)
                 
                 # Draw Waveform Outline
-                painter.setPen(QPen(QColor("#c0d0e0"), 1.0))
+                if is_live:
+                    painter.setPen(QPen(QColor("#f08080"), 1.0))
+                else:
+                    painter.setPen(QPen(QColor("#c0d0e0"), 1.0))
                 
                 # Sub-sample waveform for speed
                 half_h = int(draw_h / 2.5)
@@ -396,6 +439,7 @@ class TimelineScrollContainer(QWidget):
     def __init__(self, audio_engine, parent=None):
         super().__init__(parent)
         self.audio_engine = audio_engine
+        self.main_window = parent
         self.pixels_per_second = 60.0
         
         self.setup_ui()
@@ -405,12 +449,72 @@ class TimelineScrollContainer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # 1. Ruler at the top
+        # 1. Transport Toolbar above the Ruler
+        self.toolbar = QWidget()
+        self.toolbar.setObjectName("TimelineToolbar")
+        self.toolbar.setStyleSheet("""
+            QWidget#TimelineToolbar {
+                background-color: #252526;
+                border-bottom: 1px solid #333333;
+            }
+            QPushButton#TransportButton {
+                background-color: #2a2d32;
+                color: #e0e0e0;
+                border: 1px solid #3e4249;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton#TransportButton:hover {
+                background-color: #3e4249;
+                color: #ffffff;
+            }
+        """)
+        
+        tb_layout = QHBoxLayout(self.toolbar)
+        tb_layout.setContentsMargins(10, 4, 10, 4)
+        tb_layout.setSpacing(8)
+        
+        self.btn_stop = QPushButton("■ Stop")
+        self.btn_stop.setObjectName("TransportButton")
+        if self.main_window:
+            self.btn_stop.clicked.connect(self.main_window.on_transport_stop)
+        tb_layout.addWidget(self.btn_stop)
+        
+        self.btn_play = QPushButton("▶ Play")
+        self.btn_play.setObjectName("TransportButton")
+        if self.main_window:
+            self.btn_play.clicked.connect(self.main_window.on_transport_play)
+        tb_layout.addWidget(self.btn_play)
+        
+        self.btn_pause = QPushButton("⏸ Pause")
+        self.btn_pause.setObjectName("TransportButton")
+        if self.main_window:
+            self.btn_pause.clicked.connect(self.main_window.on_transport_pause)
+        tb_layout.addWidget(self.btn_pause)
+        
+        self.btn_record = QPushButton("● Record")
+        self.btn_record.setObjectName("TransportButton")
+        if self.main_window:
+            self.btn_record.clicked.connect(self.main_window.toggle_record)
+        tb_layout.addWidget(self.btn_record)
+        
+        tb_layout.addStretch()
+        
+        self.lbl_time = QLabel("0:00.00")
+        self.lbl_time.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        self.lbl_time.setStyleSheet("color: #e0e0e0; padding-right: 10px;")
+        tb_layout.addWidget(self.lbl_time)
+        
+        layout.addWidget(self.toolbar)
+        
+        # 2. Ruler
         self.ruler = TimeRulerWidget(self.audio_engine, self)
         self.ruler.set_zoom(self.pixels_per_second)
         layout.addWidget(self.ruler)
         
-        # 2. Scroll area containing the track lanes
+        # 3. Scroll area containing the track lanes
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setObjectName("TimelineScrollArea")
         self.scroll_area.setWidgetResizable(False)  # Let Lanes Widget set its size
@@ -423,7 +527,7 @@ class TimelineScrollContainer(QWidget):
         self.scroll_area.setWidget(self.lanes)
         layout.addWidget(self.scroll_area)
         
-        # 3. Signals connections
+        # 4. Signals connections
         self.scroll_area.horizontalScrollBar().valueChanged.connect(self.ruler.set_scroll_offset)
         
         self.ruler.timeClicked.connect(self.set_playhead_pos)
@@ -457,10 +561,31 @@ class TimelineScrollContainer(QWidget):
         self.lanes.update_geometry()
         
     def update_widgets(self):
-        # Force redraw playhead and lanes waveforms
+        # 1. Update time counter text label
+        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+        sec = self.audio_engine.playhead_samples / sr
+        minutes = int(sec // 60)
+        secs = sec % 60
+        self.lbl_time.setText(f"{minutes}:{secs:05.2f}")
+        
+        # 2. Check if timeline needs sizing updates
+        self.lanes.update_geometry()
+        
+        # 3. Redraw playhead and lanes waveforms
         self.lanes.update()
         self.ruler.update()
         
+        # 4. Handle auto-scrolling
+        if self.audio_engine.play_state in ("playing", "recording"):
+            playhead_x = int(sec * self.pixels_per_second)
+            scrollbar = self.scroll_area.horizontalScrollBar()
+            visible_width = self.scroll_area.viewport().width()
+            scroll_x = scrollbar.value()
+            
+            if playhead_x > scroll_x + int(visible_width * 0.9) or playhead_x < scroll_x:
+                target_scroll = max(0, playhead_x - int(visible_width * 0.1))
+                scrollbar.setValue(target_scroll)
+                
     def update_track_layout(self):
         # Re-initialize timeline geometry when tracks are added/removed
         self.lanes.update_geometry()
