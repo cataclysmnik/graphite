@@ -118,89 +118,103 @@ class CustomKnob(QWidget):
             
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        # Calculate knob size and boundaries
-        knob_size = min(w, h - 35)
-        rect = QRectF((w - knob_size) / 2, 5, knob_size, knob_size)
-        
-        center_x = rect.center().x()
-        center_y = rect.center().y()
-        radius = knob_size / 2.0
-        
-        # Draw background track arc (charcoal gray)
-        pen_bg = QPen(QColor("#383838"), 3.5)
-        pen_bg.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen_bg)
-        painter.drawArc(rect.adjusted(3, 3, -3, -3), int(225 * 16), int(-270 * 16))
-        
-        # Calculate normalized value [0, 1]
-        norm_val = 0.0
-        if self.max_val > self.min_val:
-            norm_val = (self.value - self.min_val) / (self.max_val - self.min_val)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-        # Draw active value track (slate blue)
-        active_color = self.studio_hover if self.is_dragging else self.studio_accent
-        pen_active = QPen(active_color, 3.5)
-        pen_active.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen_active)
-        painter.drawArc(rect.adjusted(3, 3, -3, -3), int(225 * 16), int(-270 * 16 * norm_val))
-        
-        # Draw knob core (metallic dark dial)
-        knob_inner_rect = rect.adjusted(6, 6, -6, -6)
-        knob_radius = knob_inner_rect.width() / 2.0
-        
-        # Radial gradient for professional metal appearance
-        gradient = QRadialGradient(knob_inner_rect.center(), knob_radius)
-        gradient.setColorAt(0.0, self.knob_light)
-        gradient.setColorAt(0.7, self.knob_dark)
-        gradient.setColorAt(1.0, QColor("#1e1e1e"))
-        
-        painter.setBrush(QBrush(gradient))
-        if self.is_hovered or self.hasFocus():
-            pen_outline = QPen(self.studio_accent, 1.2)
-        else:
-            pen_outline = QPen(QColor("#4f4f4f"), 1.0)
-        painter.setPen(pen_outline)
-        painter.drawEllipse(knob_inner_rect)
-        
-        # Calculate indicator line coordinates
-        theta = 225.0 - 270.0 * norm_val
-        theta_rad = math.radians(theta)
-        
-        # Draw visual indicator line on the knob face (light silver/white)
-        pointer_r_start = knob_radius * 0.2
-        pointer_r_end = knob_radius * 0.95
-        
-        px1 = center_x + pointer_r_start * math.cos(theta_rad)
-        py1 = center_y - pointer_r_start * math.sin(theta_rad)
-        px2 = center_x + pointer_r_end * math.cos(theta_rad)
-        py2 = center_y - pointer_r_end * math.sin(theta_rad)
-        
-        indicator_color = QColor("#ffffff") if (self.is_hovered or self.is_dragging) else QColor("#d4d4d4")
-        pen_indicator = QPen(indicator_color, 2.0)
-        pen_indicator.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen_indicator)
-        painter.drawLine(QPoint(int(px1), int(py1)), QPoint(int(px2), int(py2)))
-        
-        # Draw Labels
-        font_label = QFont("Segoe UI", 8, QFont.Weight.Bold)
-        painter.setFont(font_label)
-        painter.setPen(QColor("#9d9d9d"))
-        
-        # Center parameter name
-        label_y = h - 20
-        painter.drawText(0, label_y, w, 15, Qt.AlignmentFlag.AlignCenter, self.label)
-        
-        # Format the decimal value
-        val_str = f"{self.value:.{self.decimals}f}"
-        if self.unit:
-            val_str += f" {self.unit}"
+            w = self.width()
+            h = self.height()
             
-        font_val = QFont("Consolas", 8)
-        painter.setFont(font_val)
-        painter.setPen(QColor("#ffffff") if self.is_hovered or self.is_dragging else QColor("#9d9d9d"))
-        painter.drawText(0, h - 8, w, 15, Qt.AlignmentFlag.AlignCenter, val_str)
+            # Calculate knob size and boundaries
+            knob_size = min(w, h - 35)
+            rect = QRectF((w - knob_size) / 2, 5, knob_size, knob_size)
+            
+            center_x = rect.center().x()
+            center_y = rect.center().y()
+            radius = knob_size / 2.0
+            
+            # Draw physical tick markers around the knob face
+            painter.setPen(QPen(QColor("#444448"), 1))
+            for angle in range(-45, 226, 45):
+                angle_rad = math.radians(225 - angle)
+                tx1 = center_x + (radius + 2) * math.cos(angle_rad)
+                ty1 = center_y - (radius + 2) * math.sin(angle_rad)
+                tx2 = center_x + (radius + 4) * math.cos(angle_rad)
+                ty2 = center_y - (radius + 4) * math.sin(angle_rad)
+                painter.drawLine(QPointF(tx1, ty1), QPointF(tx2, ty2))
+                
+            # Draw background track arc (charcoal gray)
+            pen_bg = QPen(QColor("#2c2c2f"), 2.0)
+            pen_bg.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen_bg)
+            painter.drawArc(rect.adjusted(2, 2, -2, -2), int(225 * 16), int(-270 * 16))
+            
+            # Calculate normalized value [0, 1]
+            norm_val = 0.0
+            if self.max_val > self.min_val:
+                norm_val = (self.value - self.min_val) / (self.max_val - self.min_val)
+                
+            # Draw active value track (silver/white)
+            active_color = self.studio_hover if self.is_dragging else self.studio_accent
+            pen_active = QPen(active_color, 2.0)
+            pen_active.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen_active)
+            painter.drawArc(rect.adjusted(2, 2, -2, -2), int(225 * 16), int(-270 * 16 * norm_val))
+            
+            # Draw knob core (metallic dark dial)
+            knob_inner_rect = rect.adjusted(4, 4, -4, -4)
+            knob_radius = knob_inner_rect.width() / 2.0
+            
+            # Radial gradient for professional metal appearance
+            gradient = QRadialGradient(knob_inner_rect.center(), knob_radius)
+            gradient.setColorAt(0.0, self.knob_light)
+            gradient.setColorAt(0.7, self.knob_dark)
+            gradient.setColorAt(1.0, QColor("#121214"))
+            
+            painter.setBrush(QBrush(gradient))
+            if self.is_hovered or self.hasFocus():
+                pen_outline = QPen(self.studio_accent, 1.0)
+            else:
+                pen_outline = QPen(QColor("#2d2d30"), 0.8)
+            painter.setPen(pen_outline)
+            painter.drawEllipse(knob_inner_rect)
+            
+            # Calculate indicator line coordinates
+            theta = 225.0 - 270.0 * norm_val
+            theta_rad = math.radians(theta)
+            
+            # Draw visual indicator line on the knob face (light silver/white)
+            pointer_r_start = knob_radius * 0.1
+            pointer_r_end = knob_radius * 0.9
+            
+            px1 = center_x + pointer_r_start * math.cos(theta_rad)
+            py1 = center_y - pointer_r_start * math.sin(theta_rad)
+            px2 = center_x + pointer_r_end * math.cos(theta_rad)
+            py2 = center_y - pointer_r_end * math.sin(theta_rad)
+            
+            indicator_color = QColor("#ffffff") if (self.is_hovered or self.is_dragging) else QColor("#b3b3b3")
+            pen_indicator = QPen(indicator_color, 1.5)
+            pen_indicator.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen_indicator)
+            painter.drawLine(QPoint(int(px1), int(py1)), QPoint(int(px2), int(py2)))
+            
+            # Draw Labels
+            font_label = QFont("Segoe UI", 8, QFont.Weight.Bold)
+            painter.setFont(font_label)
+            painter.setPen(QColor("#88888c"))
+            
+            # Center parameter name
+            label_y = h - 20
+            painter.drawText(0, label_y, w, 15, Qt.AlignmentFlag.AlignCenter, self.label)
+            
+            # Format the decimal value
+            val_str = f"{self.value:.{self.decimals}f}"
+            if self.unit:
+                val_str += f" {self.unit}"
+                
+            font_val = QFont("Consolas", 8)
+            painter.setFont(font_val)
+            painter.setPen(QColor("#ffffff") if self.is_hovered or self.is_dragging else QColor("#88888c"))
+            painter.drawText(0, h - 8, w, 15, Qt.AlignmentFlag.AlignCenter, val_str)
+        finally:
+            painter.end()
+

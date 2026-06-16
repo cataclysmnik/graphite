@@ -23,129 +23,132 @@ class MetronomePendulum(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        # Fill background
-        painter.fillRect(0, 0, w, h, QColor("#000000"))
-        
-        # Core geometry
-        cx = w / 2.0
-        # Pivot point of the pendulum is near the bottom of the body
-        pivot_y = h - 35.0
-        
-        # 1. Draw Metronome body (Pyramid)
-        body = QPolygonF([
-            QPointF(cx - 15.0, 30.0),
-            QPointF(cx + 15.0, 30.0),
-            QPointF(cx + 55.0, h - 20.0),
-            QPointF(cx - 55.0, h - 20.0)
-        ])
-        
-        painter.setBrush(QBrush(QColor("#000000")))
-        painter.setPen(QPen(QColor("#222225"), 1.5))
-        painter.drawPolygon(body)
-        
-        # Draw inner face plate
-        face_plate = QPolygonF([
-            QPointF(cx - 10.0, 45.0),
-            QPointF(cx + 10.0, 45.0),
-            QPointF(cx + 38.0, h - 30.0),
-            QPointF(cx - 38.0, h - 30.0)
-        ])
-        painter.setBrush(QBrush(QColor("#050505")))
-        painter.setPen(QPen(QColor("#222225"), 1))
-        painter.drawPolygon(face_plate)
-        
-        # Draw tempo markings / guidelines on the face plate
-        painter.setPen(QPen(QColor("#222225"), 1))
-        for y_pos in range(int(45.0 + 15.0), int(h - 40.0), 20):
-            # Guidelines lines
-            width_at_y = 15.0 + (y_pos - 45.0) * 0.18
-            painter.drawLine(cx - width_at_y, y_pos, cx + width_at_y, y_pos)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-        # 2. Calculate Pendulum Swing Phase
-        # Find exact playhead sample alignment from audio engine
-        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
-        bpm = self.audio_engine.bpm
-        playhead = self.audio_engine.playhead_samples
-        play_active = self.audio_engine.play_state in ("playing", "recording")
-        
-        samples_per_beat = (60.0 / bpm) * sr
-        
-        # Pendulum cycle is 2 beats (left, then right)
-        beat_phase = (playhead / samples_per_beat) % 2.0
-        
-        # Calculate angle of pendulum swing (in degrees)
-        if play_active:
-            # Swing angle uses sine wave mapped between -26 and +26 degrees
-            angle_deg = 26.0 * math.sin(beat_phase * math.pi)
-        else:
-            angle_deg = 0.0 # Rest straight up
+            w = self.width()
+            h = self.height()
             
-        angle_rad = math.radians(angle_deg)
-        
-        # 3. Draw the Steel Pendulum Rod
-        rod_len = h - 80.0
-        # The rod extends upwards from the pivot
-        rx = cx + rod_len * math.sin(angle_rad)
-        ry = pivot_y - rod_len * math.cos(angle_rad)
-        
-        painter.setPen(QPen(QColor("#ffffff"), 2))
-        painter.drawLine(cx, pivot_y, rx, ry)
-        
-        # Draw the sliding weight block on the rod
-        bpm_percent = (bpm - 40.0) / (240.0 - 40.0) # 0.0 to 1.0
-        weight_dist = 40.0 + (1.0 - bpm_percent) * (rod_len - 60.0)
-        
-        wx = cx + weight_dist * math.sin(angle_rad)
-        wy = pivot_y - weight_dist * math.cos(angle_rad)
-        
-        # Draw rectangular weight
-        weight_rect = QRectF(wx - 10.0, wy - 8.0, 20.0, 16.0)
-        painter.setBrush(QBrush(QColor("#ffffff"))) # Clean white weight block
-        painter.setPen(QPen(QColor("#000000"), 1)) # Black border
-        painter.drawRoundedRect(weight_rect, 0, 0) # Square aesthetic
-        
-        # Draw pivot cap at base
-        painter.setBrush(QBrush(QColor("#222225")))
-        painter.setPen(QPen(QColor("#333333"), 1))
-        painter.drawEllipse(QPointF(cx, pivot_y), 5, 5)
-        
-        # 4. Draw Beat Flashing LED
-        # Determine if currently flashing (first 15% of a beat)
-        beat_number = int((playhead / samples_per_beat) % self.audio_engine.time_sig_numerator)
-        flash_duration = min(4410, int(samples_per_beat * 0.15))
-        is_flashing = play_active and (playhead % samples_per_beat < flash_duration)
-        
-        led_y = 15.0
-        led_grad = QRadialGradient(cx, led_y, 10)
-        
-        if is_flashing:
-            if beat_number == 0:
-                # Accented beat 1 (glowing pure white)
-                led_grad.setColorAt(0, QColor("#ffffff"))
-                led_grad.setColorAt(1, QColor(255, 255, 255, 0))
-                led_color = QColor("#ffffff")
+            # Fill background
+            painter.fillRect(0, 0, w, h, QColor("#000000"))
+            
+            # Core geometry
+            cx = w / 2.0
+            # Pivot point of the pendulum is near the bottom of the body
+            pivot_y = h - 35.0
+            
+            # 1. Draw Metronome body (Pyramid)
+            body = QPolygonF([
+                QPointF(cx - 15.0, 30.0),
+                QPointF(cx + 15.0, 30.0),
+                QPointF(cx + 55.0, h - 20.0),
+                QPointF(cx - 55.0, h - 20.0)
+            ])
+            
+            painter.setBrush(QBrush(QColor("#000000")))
+            painter.setPen(QPen(QColor("#222225"), 1.5))
+            painter.drawPolygon(body)
+            
+            # Draw inner face plate
+            face_plate = QPolygonF([
+                QPointF(cx - 10.0, 45.0),
+                QPointF(cx + 10.0, 45.0),
+                QPointF(cx + 38.0, h - 30.0),
+                QPointF(cx - 38.0, h - 30.0)
+            ])
+            painter.setBrush(QBrush(QColor("#050505")))
+            painter.setPen(QPen(QColor("#222225"), 1))
+            painter.drawPolygon(face_plate)
+            
+            # Draw tempo markings / guidelines on the face plate
+            painter.setPen(QPen(QColor("#222225"), 1))
+            for y_pos in range(int(45.0 + 15.0), int(h - 40.0), 20):
+                # Guidelines lines
+                width_at_y = 15.0 + (y_pos - 45.0) * 0.18
+                painter.drawLine(cx - width_at_y, y_pos, cx + width_at_y, y_pos)
+                
+            # 2. Calculate Pendulum Swing Phase
+            # Find exact playhead sample alignment from audio engine
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            bpm = self.audio_engine.bpm
+            playhead = self.audio_engine.playhead_samples
+            play_active = self.audio_engine.play_state in ("playing", "recording")
+            
+            samples_per_beat = (60.0 / bpm) * sr
+            
+            # Pendulum cycle is 2 beats (left, then right)
+            beat_phase = (playhead / samples_per_beat) % 2.0
+            
+            # Calculate angle of pendulum swing (in degrees)
+            if play_active:
+                # Swing angle uses sine wave mapped between -26 and +26 degrees
+                angle_deg = 26.0 * math.sin(beat_phase * math.pi)
             else:
-                # Unaccented beats (glowing medium gray)
-                led_grad.setColorAt(0, QColor("#888888"))
-                led_grad.setColorAt(1, QColor(136, 136, 136, 0))
-                led_color = QColor("#aaaaaa")
-        else:
-            # Idle LED (dim gray/black)
-            led_grad.setColorAt(0, QColor("#111111"))
-            led_grad.setColorAt(1, QColor(17, 17, 17, 0))
-            led_color = QColor("#222225")
+                angle_deg = 0.0 # Rest straight up
+                
+            angle_rad = math.radians(angle_deg)
             
-        painter.setBrush(QBrush(led_grad))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(cx, led_y), 12, 12)
-        
-        painter.setBrush(QBrush(led_color))
-        painter.drawEllipse(QPointF(cx, led_y), 4, 4)
+            # 3. Draw the Steel Pendulum Rod
+            rod_len = h - 80.0
+            # The rod extends upwards from the pivot
+            rx = cx + rod_len * math.sin(angle_rad)
+            ry = pivot_y - rod_len * math.cos(angle_rad)
+            
+            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.drawLine(cx, pivot_y, rx, ry)
+            
+            # Draw the sliding weight block on the rod
+            bpm_percent = (bpm - 40.0) / (240.0 - 40.0) # 0.0 to 1.0
+            weight_dist = 40.0 + (1.0 - bpm_percent) * (rod_len - 60.0)
+            
+            wx = cx + weight_dist * math.sin(angle_rad)
+            wy = pivot_y - weight_dist * math.cos(angle_rad)
+            
+            # Draw rectangular weight
+            weight_rect = QRectF(wx - 10.0, wy - 8.0, 20.0, 16.0)
+            painter.setBrush(QBrush(QColor("#ffffff"))) # Clean white weight block
+            painter.setPen(QPen(QColor("#000000"), 1)) # Black border
+            painter.drawRoundedRect(weight_rect, 0, 0) # Square aesthetic
+            
+            # Draw pivot cap at base
+            painter.setBrush(QBrush(QColor("#222225")))
+            painter.setPen(QPen(QColor("#333333"), 1))
+            painter.drawEllipse(QPointF(cx, pivot_y), 5, 5)
+            
+            # 4. Draw Beat Flashing LED
+            # Determine if currently flashing (first 15% of a beat)
+            beat_number = int((playhead / samples_per_beat) % self.audio_engine.time_sig_numerator)
+            flash_duration = min(4410, int(samples_per_beat * 0.15))
+            is_flashing = play_active and (playhead % samples_per_beat < flash_duration)
+            
+            led_y = 15.0
+            led_grad = QRadialGradient(cx, led_y, 10)
+            
+            if is_flashing:
+                if beat_number == 0:
+                    # Accented beat 1 (glowing pure white)
+                    led_grad.setColorAt(0, QColor("#ffffff"))
+                    led_grad.setColorAt(1, QColor(255, 255, 255, 0))
+                    led_color = QColor("#ffffff")
+                else:
+                    # Unaccented beats (glowing medium gray)
+                    led_grad.setColorAt(0, QColor("#888888"))
+                    led_grad.setColorAt(1, QColor(136, 136, 136, 0))
+                    led_color = QColor("#aaaaaa")
+            else:
+                # Idle LED (dim gray/black)
+                led_grad.setColorAt(0, QColor("#111111"))
+                led_grad.setColorAt(1, QColor(17, 17, 17, 0))
+                led_color = QColor("#222225")
+                
+            painter.setBrush(QBrush(led_grad))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(cx, led_y), 12, 12)
+            
+            painter.setBrush(QBrush(led_color))
+            painter.drawEllipse(QPointF(cx, led_y), 4, 4)
+        finally:
+            painter.end()
 
 
 class TapTempo:

@@ -38,121 +38,123 @@ class TunerDial(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        # Center of the dial arc is at the bottom-center of the widget
-        cx = w / 2.0
-        cy = h - 20.0
-        
-        # Calculate radius based on widget size
-        radius = min(w / 2.0 - 30.0, h - 40.0)
-        if radius < 50.0:
-            radius = 50.0
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-        # Draw background panel
-        painter.fillRect(0, 0, w, h, QColor("#000000"))
-        
-        # Draw target guide arc (single thin gray line instead of colored arcs)
-        arc_rect = QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
-        pen_arc = QPen(QColor("#333333"), 1.5)
-        painter.setPen(pen_arc)
-        painter.drawArc(arc_rect, 30 * 16, 120 * 16) # From -50 to +50 cents (150 to 30 deg)
-        
-        # Draw Tick Marks
-        painter.setPen(QPen(QColor("#333333"), 1))
-        font_ticks = QFont("Consolas", 8)
-        painter.setFont(font_ticks)
-        
-        for cents_val in range(-50, 51, 10):
-            # Calculate angle in radians
-            # -50 cents = 150 deg (5*pi/6), 0 cents = 90 deg (pi/2), +50 cents = 30 deg (pi/6)
-            angle_deg = 90.0 - (cents_val / 50.0) * 60.0
-            angle_rad = math.radians(angle_deg)
+            w = self.width()
+            h = self.height()
             
-            # Tick lines
-            cos_a = math.cos(angle_rad)
-            sin_a = math.sin(angle_rad)
+            # Center of the dial arc is at the bottom-center of the widget
+            cx = w / 2.0
+            cy = h - 20.0
             
-            x1 = cx + (radius - 5.0) * cos_a
-            y1 = cy - (radius - 5.0) * sin_a
-            x2 = cx + (radius + 5.0) * cos_a
-            y2 = cy - (radius + 5.0) * sin_a
-            
-            # Make center tick prominent (Nothing Red highlight marker)
-            if cents_val == 0:
-                painter.setPen(QPen(QColor("#ff0033"), 2.5))
-                painter.drawLine(x1 - cos_a * 2.0, y1 + sin_a * 2.0, x2 + cos_a * 2.0, y2 - sin_a * 2.0)
-            else:
-                painter.setPen(QPen(QColor("#555555"), 1))
-                painter.drawLine(x1, y1, x2, y2)
+            # Calculate radius based on widget size
+            radius = min(w / 2.0 - 30.0, h - 40.0)
+            if radius < 50.0:
+                radius = 50.0
                 
-            # Draw tick labels (-50, 0, +50)
-            if cents_val in (-50, 0, 50):
+            # Draw background panel
+            painter.fillRect(0, 0, w, h, QColor("#000000"))
+            
+            # Draw target guide arc (single thin gray line instead of colored arcs)
+            arc_rect = QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
+            pen_arc = QPen(QColor("#333333"), 1.5)
+            painter.setPen(pen_arc)
+            painter.drawArc(arc_rect, 30 * 16, 120 * 16) # From -50 to +50 cents (150 to 30 deg)
+            
+            # Draw Tick Marks
+            painter.setPen(QPen(QColor("#333333"), 1))
+            font_ticks = QFont("Consolas", 8)
+            painter.setFont(font_ticks)
+            
+            for cents_val in range(-50, 51, 10):
+                # Calculate angle in radians
+                # -50 cents = 150 deg (5*pi/6), 0 cents = 90 deg (pi/2), +50 cents = 30 deg (pi/6)
+                angle_deg = 90.0 - (cents_val / 50.0) * 60.0
+                angle_rad = math.radians(angle_deg)
+                
+                # Tick lines
+                cos_a = math.cos(angle_rad)
+                sin_a = math.sin(angle_rad)
+                
+                x1 = cx + (radius - 5.0) * cos_a
+                y1 = cy - (radius - 5.0) * sin_a
+                x2 = cx + (radius + 5.0) * cos_a
+                y2 = cy - (radius + 5.0) * sin_a
+                
+                # Make center tick prominent (Nothing Red highlight marker)
                 if cents_val == 0:
-                    painter.setPen(QColor("#ff0033")) # Center tick text highlight
+                    painter.setPen(QPen(QColor("#ff0033"), 2.5))
+                    painter.drawLine(x1 - cos_a * 2.0, y1 + sin_a * 2.0, x2 + cos_a * 2.0, y2 - sin_a * 2.0)
                 else:
-                    painter.setPen(QColor("#888888"))
-                lbl_text = f"+{cents_val}" if cents_val > 0 else str(cents_val)
-                if cents_val == 0:
-                    lbl_text = "0"
-                tx = cx + (radius + 18.0) * cos_a - 10.0
-                ty = cy - (radius + 18.0) * sin_a + 5.0
-                painter.drawText(int(tx), int(ty), 20, 12, Qt.AlignmentFlag.AlignCenter, lbl_text)
+                    painter.setPen(QPen(QColor("#555555"), 1))
+                    painter.drawLine(x1, y1, x2, y2)
+                    
+                # Draw tick labels (-50, 0, +50)
+                if cents_val in (-50, 0, 50):
+                    if cents_val == 0:
+                        painter.setPen(QColor("#ff0033")) # Center tick text highlight
+                    else:
+                        painter.setPen(QColor("#888888"))
+                    lbl_text = f"+{cents_val}" if cents_val > 0 else str(cents_val)
+                    if cents_val == 0:
+                        lbl_text = "0"
+                    tx = cx + (radius + 18.0) * cos_a - 10.0
+                    ty = cy - (radius + 18.0) * sin_a + 5.0
+                    painter.drawText(int(tx), int(ty), 20, 12, Qt.AlignmentFlag.AlignCenter, lbl_text)
+                    
+            # Draw Center Glow Circle
+            radial_grad = QRadialGradient(cx, cy, 30)
+            if self.has_signal:
+                if abs(self.smoothed_cents) <= 3.0:
+                    # Perfectly in tune glow (Nothing Red)
+                    radial_grad.setColorAt(0, QColor(255, 0, 51, 80))
+                    radial_grad.setColorAt(1, QColor(255, 0, 51, 0))
+                else:
+                    # Out of tune glow (white/gray)
+                    radial_grad.setColorAt(0, QColor(255, 255, 255, 30))
+                    radial_grad.setColorAt(1, QColor(255, 255, 255, 0))
+            else:
+                # Idle/no signal glow
+                radial_grad.setColorAt(0, QColor(50, 50, 50, 10))
+                radial_grad.setColorAt(1, QColor(50, 50, 50, 0))
                 
-        # Draw Center Glow Circle
-        radial_grad = QRadialGradient(cx, cy, 30)
-        if self.has_signal:
-            if abs(self.smoothed_cents) <= 3.0:
-                # Perfectly in tune glow (Nothing Red)
-                radial_grad.setColorAt(0, QColor(255, 0, 51, 80))
-                radial_grad.setColorAt(1, QColor(255, 0, 51, 0))
-            else:
-                # Out of tune glow (white/gray)
-                radial_grad.setColorAt(0, QColor(255, 255, 255, 30))
-                radial_grad.setColorAt(1, QColor(255, 255, 255, 0))
-        else:
-            # Idle/no signal glow
-            radial_grad.setColorAt(0, QColor(50, 50, 50, 10))
-            radial_grad.setColorAt(1, QColor(50, 50, 50, 0))
-            
-        painter.setBrush(QBrush(radial_grad))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(cx, cy), radius * 0.7, radius * 0.7)
+            painter.setBrush(QBrush(radial_grad))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(cx, cy), radius * 0.7, radius * 0.7)
 
-        # Draw central note guidelines circle
-        painter.setPen(QPen(QColor("#222225"), 1.5))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(QPointF(cx, cy), 16, 16)
-        
-        # --- Draw the Needle ---
-        needle_angle_deg = 90.0 - (self.smoothed_cents / 50.0) * 60.0
-        needle_angle_rad = math.radians(needle_angle_deg)
-        
-        needle_len = radius - 8.0
-        nx = cx + needle_len * math.cos(needle_angle_rad)
-        ny = cy - needle_len * math.sin(needle_angle_rad)
-        
-        # Choose needle color based on tuning accuracy
-        if self.has_signal:
-            if abs(self.smoothed_cents) <= 3.0:
-                needle_color = QColor("#ff0033") # Nothing brand red
-            else:
-                needle_color = QColor("#ffffff") # Pure white
-        else:
-            needle_color = QColor("#333333") # Inactive dark gray
+            # Draw central note guidelines circle
+            painter.setPen(QPen(QColor("#222225"), 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(QPointF(cx, cy), 16, 16)
             
-        # Draw needle line
-        painter.setPen(QPen(needle_color, 2))
-        painter.drawLine(cx, cy, nx, ny)
-        
-        # Draw needle cap pivot
-        painter.setPen(QPen(QColor("#000000"), 2))
-        painter.setBrush(QBrush(needle_color))
-        painter.drawEllipse(QPointF(cx, cy), 6, 6)
-
+            # --- Draw the Needle ---
+            needle_angle_deg = 90.0 - (self.smoothed_cents / 50.0) * 60.0
+            needle_angle_rad = math.radians(needle_angle_deg)
+            
+            needle_len = radius - 8.0
+            nx = cx + needle_len * math.cos(needle_angle_rad)
+            ny = cy - needle_len * math.sin(needle_angle_rad)
+            
+            # Choose needle color based on tuning accuracy
+            if self.has_signal:
+                if abs(self.smoothed_cents) <= 3.0:
+                    needle_color = QColor("#ff0033") # Nothing brand red
+                else:
+                    needle_color = QColor("#ffffff") # Pure white
+            else:
+                needle_color = QColor("#333333") # Inactive dark gray
+                
+            # Draw needle line
+            painter.setPen(QPen(needle_color, 2))
+            painter.drawLine(cx, cy, nx, ny)
+            
+            # Draw needle cap pivot
+            painter.setPen(QPen(QColor("#000000"), 2))
+            painter.setBrush(QBrush(needle_color))
+            painter.drawEllipse(QPointF(cx, cy), 6, 6)
+        finally:
+            painter.end()
 
 class GuitarTunerWidget(QWidget):
     """Detailed aesthetic built-in guitar tuner widget."""

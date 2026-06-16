@@ -14,6 +14,7 @@ from widgets.audio_settings import AudioSettingsDialog
 from widgets.timeline import TimelineScrollContainer
 from widgets.tuner import GuitarTunerWidget
 from widgets.metronome import GuitarMetronomeWidget
+from widgets.signal_flow import SignalFlowWidget
 import project_manager
 
 from theme_utils import FramelessWindowMixin
@@ -287,8 +288,10 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.bottom_dock = QTabWidget()
         self.bottom_dock.setObjectName("BottomDockTabs")
         
-        # Instantiate effects rack (will be placed inside VST Settings tab later)
+        # Instantiate effects rack and signal flow
         self.effects_rack = EffectsRack(self.audio_engine)
+        self.signal_flow_widget = SignalFlowWidget(self.audio_engine, self.effects_rack)
+        self.effects_rack.set_signal_flow_widget(self.signal_flow_widget)
         
         # Utilities Tab (Tuner and Metronome side-by-side)
         utility_widget = QWidget()
@@ -384,13 +387,16 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         self.main_tabs.addTab(self.workspace_tab, "WORKSPACE")
         
-        # Tab 2: VST Settings
+        # Tab 2: Effects & Signal Flow
         self.vst_settings_tab = QWidget()
         vst_settings_layout = QVBoxLayout(self.vst_settings_tab)
         vst_settings_layout.setContentsMargins(10, 10, 10, 10)
-        vst_settings_layout.setSpacing(0)
+        vst_settings_layout.setSpacing(10)
         
-        # Put effects rack directly in the tab layout (no splitter, no vst_stack container)
+        # Add drag-and-drop signal flow at the top
+        vst_settings_layout.addWidget(self.signal_flow_widget)
+        
+        # Add effects rack directly
         vst_settings_layout.addWidget(self.effects_rack)
         self.main_tabs.addTab(self.vst_settings_tab, "EFFECTS")
         
@@ -1050,17 +1056,37 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                 WS_SYSMENU = 0x00080000
                 WS_THICKFRAME = 0x00040000
                 WS_MINIMIZEBOX = 0x00020000
-                WS_MAXIMIZEBOX = 0x00010000
                 
-                new_style = (style | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
+                GWL_STYLE = -16
+                new_style = (style | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX)
+                # Remove WS_CHILD (0x40000000) if set
+                new_style = new_style & ~0x40000000
                 user32.SetWindowLongPtrW(root, GWL_STYLE, ctypes.c_void_p(new_style))
                 
-                # Force frame change to apply styling immediately
-                SWP_NOMOVE = 0x0002
-                SWP_NOSIZE = 0x0001
+                # Set main window as owner (keeps VST on top, gives it real title bar)
+                GWLP_HWNDPARENT = -8
+                main_hwnd = int(self.winId())
+                user32.SetWindowLongPtrW(root, GWLP_HWNDPARENT, ctypes.c_void_p(main_hwnd))
+                
+                # Snap position: just below signal_flow_widget
+                try:
+                    snap_pos = self._get_vst_snap_position(cw, ch)
+                    snap_x, snap_y = snap_pos
+                except Exception:
+                    snap_x, snap_y = 100, 200
+                
+                # Apply dark DWM styling
+                try:
+                    apply_dark_theme_to_hwnd(root)
+                except Exception:
+                    pass
+                
+                # Apply frame change and move to snap position
                 SWP_NOZORDER = 0x0004
                 SWP_FRAMECHANGED = 0x0020
-                user32.SetWindowPos(root, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
+                SWP_SHOWWINDOW = 0x0040
+                user32.SetWindowPos(root, 0, snap_x, snap_y, cw, ch,
+                                    SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW)
                 
                 # Stop scanner timer
                 self._enforce_timer.stop()
@@ -1201,22 +1227,62 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                     WS_SYSMENU = 0x00080000
                     WS_THICKFRAME = 0x00040000
                     WS_MINIMIZEBOX = 0x00020000
-                    WS_MAXIMIZEBOX = 0x00010000
                     
-                    new_style = (style | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
+                    new_style = (style | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX)
+                    new_style = new_style & ~0x40000000  # Remove WS_CHILD
                     user32.SetWindowLongPtrW(root, GWL_STYLE, ctypes.c_void_p(new_style))
                     
-                    # Force frame change to apply styling immediately
-                    SWP_NOMOVE = 0x0002
-                    SWP_NOSIZE = 0x0001
+                    # Set main window as owner
+                    GWLP_HWNDPARENT = -8
+                    main_hwnd = int(self.winId())
+                    user32.SetWindowLongPtrW(root, GWLP_HWNDPARENT, ctypes.c_void_p(main_hwnd))
+                    
+                    # Snap below signal_flow_widget
+                    try:
+                        snap_pos = self._get_vst_snap_position(cw, ch)
+                        snap_x, snap_y = snap_pos
+                    except Exception:
+                        snap_x, snap_y = 100, 200
+                    
+                    try:
+                        apply_dark_theme_to_hwnd(root)
+                    except Exception:
+                        pass
+                    
                     SWP_NOZORDER = 0x0004
                     SWP_FRAMECHANGED = 0x0020
-                    user32.SetWindowPos(root, 0, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED)
+                    SWP_SHOWWINDOW = 0x0040
+                    user32.SetWindowPos(root, 0, snap_x, snap_y, cw, ch,
+                                        SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW)
                     
                     # Stop scanner timer
                     self._enforce_timer.stop()
             except Exception:
                 pass
+
+    def _get_vst_snap_position(self, vst_w, vst_h):
+        """Calculate screen position to snap VST window just below the signal flow widget."""
+        # Get the global (screen) rect of the signal_flow_widget bottom-left
+        try:
+            flow = self.signal_flow_widget
+            top_left_global = flow.mapToGlobal(flow.rect().bottomLeft())
+            snap_x = top_left_global.x()
+            snap_y = top_left_global.y() + 4  # 4px gap
+            
+            # Ensure the window doesn't go off-screen to the right
+            from PySide6.QtWidgets import QApplication
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geo = screen.availableGeometry()
+                if snap_x + vst_w > screen_geo.right():
+                    snap_x = max(screen_geo.left(), screen_geo.right() - vst_w)
+                if snap_y + vst_h > screen_geo.bottom():
+                    # Place above the signal_flow_widget instead
+                    top_global = flow.mapToGlobal(flow.rect().topLeft())
+                    snap_y = max(screen_geo.top(), top_global.y() - vst_h - 4)
+            return (snap_x, snap_y)
+        except Exception:
+            return (100, 200)
 
     def closeEvent(self, event):
         """Release audio stream explicitly when app terminates."""
@@ -1275,6 +1341,27 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.audio_engine.start_recording()
         self.update_transport_ui()
         self.update_stream_btn_style()
+
+    def update_transport_ui(self):
+        state = self.audio_engine.play_state
+        if not hasattr(self, 'timeline') or not hasattr(self.timeline, 'btn_play_pause'):
+            return
+            
+        self.timeline.btn_play_pause.setStyleSheet("")
+        self.timeline.btn_record.setStyleSheet("")
+        
+        if state == "playing":
+            self.timeline.btn_play_pause.setIcon(self.timeline.icon_pause)
+            self.timeline.btn_play_pause.setToolTip("Pause")
+            self.timeline.btn_play_pause.setStyleSheet("background-color: #ffffff; border-color: #ffffff; color: #000000;")
+        else:
+            self.timeline.btn_play_pause.setIcon(self.timeline.icon_play)
+            self.timeline.btn_play_pause.setToolTip("Play")
+            if state == "paused":
+                self.timeline.btn_play_pause.setStyleSheet("background-color: #222225; border-color: #444448; color: #ffffff;")
+                
+        if state == "recording":
+            self.timeline.btn_record.setStyleSheet("background-color: #ff0033; border-color: #ff0033; color: #ffffff;")
 
     def update_transport_ui(self):
         state = self.audio_engine.play_state

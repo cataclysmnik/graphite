@@ -4,7 +4,7 @@ os.environ["SD_ENABLE_ASIO"] = "1"
 import sounddevice as sd
 import numpy as np
 import threading
-from pedalboard import Pedalboard
+from pedalboard import Pedalboard, Distortion, HighpassFilter, LowpassFilter, Gain
 
 class KarplusStrongString:
     """Simulates a plucked string using the Karplus-Strong algorithm."""
@@ -140,6 +140,57 @@ class TunerBuffer:
                 return self.buffer[start:end].copy()
             else:
                 return np.concatenate([self.buffer[start:], self.buffer[:end]])
+
+
+class TubeOverdrive(Pedalboard):
+    """Skeuomorphic Tube Screamer model wrapping HPF, Distortion, Gain (Level), and LPF."""
+    def __init__(self, drive_db=15.0, tone=0.5, level_db=0.0):
+        self._drive_db = drive_db
+        self._tone = tone
+        self._level_db = level_db
+        
+        self.hpf = HighpassFilter(cutoff_frequency_hz=self._map_tone_to_hpf(tone))
+        self.dist = Distortion(drive_db=drive_db)
+        self.gain = Gain(gain_db=level_db)
+        self.lpf = LowpassFilter(cutoff_frequency_hz=self._map_tone_to_lpf(tone))
+        
+        super().__init__([self.hpf, self.dist, self.gain, self.lpf])
+        
+    def _map_tone_to_hpf(self, tone):
+        # tone=0 -> HPF=350Hz (tighter, mid hump), tone=1 -> HPF=120Hz (fatter)
+        return 350.0 - tone * 230.0
+        
+    def _map_tone_to_lpf(self, tone):
+        # tone=0 -> LPF=2200Hz (warmer, dark), tone=1 -> LPF=6500Hz (brighter, screaming)
+        return 2200.0 + tone * 4300.0
+        
+    @property
+    def drive_db(self):
+        return self._drive_db
+        
+    @drive_db.setter
+    def drive_db(self, val):
+        self._drive_db = val
+        self.dist.drive_db = val
+        
+    @property
+    def tone(self):
+        return self._tone
+        
+    @tone.setter
+    def tone(self, val):
+        self._tone = val
+        self.hpf.cutoff_frequency_hz = self._map_tone_to_hpf(val)
+        self.lpf.cutoff_frequency_hz = self._map_tone_to_lpf(val)
+        
+    @property
+    def level_db(self):
+        return self._level_db
+        
+    @level_db.setter
+    def level_db(self, val):
+        self._level_db = val
+        self.gain.gain_db = val
 
 
 class AudioItem:

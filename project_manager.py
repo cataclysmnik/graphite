@@ -5,12 +5,12 @@ from pedalboard import (
     NoiseGate, Distortion, Chorus, Phaser, Delay, Reverb,
     PitchShift, Compressor, LowpassFilter, HighpassFilter, load_plugin
 )
-from audio_engine import Track, EffectWrapper, AudioItem
+from audio_engine import Track, EffectWrapper, AudioItem, TubeOverdrive
 
 # Map of effect types to their Pedalboard class and standard parameters
 EFFECT_CLASSES = {
     "NoiseGate": (NoiseGate, ["threshold_db", "ratio", "attack_ms", "release_ms"]),
-    "Distortion": (Distortion, ["drive_db"]),
+    "Distortion": (TubeOverdrive, ["drive_db", "tone", "level_db"]),
     "Chorus": (Chorus, ["rate_hz", "depth", "feedback", "mix"]),
     "Phaser": (Phaser, ["rate_hz", "depth", "feedback", "mix"]),
     "Delay": (Delay, ["delay_seconds", "feedback", "mix"]),

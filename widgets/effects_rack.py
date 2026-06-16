@@ -10,7 +10,7 @@ from pedalboard import (
     NoiseGate, Distortion, Chorus, Phaser, Delay, Reverb,
     PitchShift, Compressor, LowpassFilter, HighpassFilter, load_plugin
 )
-from audio_engine import EffectWrapper
+from audio_engine import EffectWrapper, TubeOverdrive
 from widgets.knob import CustomKnob
 
 def apply_dark_theme_to_hwnd(hwnd):
@@ -68,10 +68,6 @@ def apply_dark_theme_to_hwnd(hwnd):
         print(f"Failed to apply dark theme to hwnd: {e}")
 
 
-# VstDrawerWidget class removed as settings are now tab-integrated
-
-
-
 def scan_for_vst3s(search_paths):
     vst_list = []
     for path in search_paths:
@@ -79,14 +75,12 @@ def scan_for_vst3s(search_paths):
             continue
         try:
             for root, dirs, files in os.walk(path):
-                # Handle folders ending in .vst3
                 vst_dirs = [d for d in dirs if d.lower().endswith('.vst3')]
                 for d in vst_dirs:
                     full_path = os.path.join(root, d)
                     name = os.path.splitext(d)[0]
                     vst_list.append((name, full_path))
                 
-                # Prune walking deeper into .vst3 folders
                 dirs[:] = [d for d in dirs if not d.lower().endswith('.vst3')]
                 
                 for f in files:
@@ -97,7 +91,6 @@ def scan_for_vst3s(search_paths):
                             vst_list.append((name, full_path))
         except Exception as e:
             print(f"Error scanning VST path {path}: {e}")
-    # Sort alphabetically by name
     vst_list.sort(key=lambda x: x[0].lower())
     return vst_list
 
@@ -108,6 +101,8 @@ PARAM_METADATA = {
     "attack_ms": {"label": "Attack", "min": 0.1, "max": 200.0, "default": 2.0, "unit": "ms", "decimals": 1},
     "release_ms": {"label": "Release", "min": 10.0, "max": 2000.0, "default": 150.0, "unit": "ms", "decimals": 0},
     "drive_db": {"label": "Drive", "min": 0.0, "max": 50.0, "default": 20.0, "unit": "dB", "decimals": 1},
+    "tone": {"label": "Tone", "min": 0.0, "max": 1.0, "default": 0.5, "unit": "", "decimals": 2},
+    "level_db": {"label": "Level", "min": -20.0, "max": 20.0, "default": 0.0, "unit": "dB", "decimals": 1},
     "rate_hz": {"label": "Rate", "min": 0.05, "max": 10.0, "default": 1.0, "unit": "Hz", "decimals": 2},
     "depth": {"label": "Depth", "min": 0.0, "max": 1.0, "default": 0.5, "unit": "", "decimals": 2},
     "feedback": {"label": "Feedback", "min": 0.0, "max": 0.99, "default": 0.25, "unit": "", "decimals": 2},
@@ -227,8 +222,6 @@ class EffectCard(QFrame):
                             decimals=meta["decimals"]
                         )
                         knob.setValue(curr_val)
-                        # Connect knob to real-time parameter setting
-                        # Inside lambda, store parameter name dynamically
                         knob.valueChanged.connect(
                             lambda val, name=p_name: self.on_parameter_changed(name, val)
                         )
@@ -303,7 +296,6 @@ class EffectCard(QFrame):
         self.effectChanged.emit()
         
     def on_parameter_changed(self, param_name, value):
-        # Set parameter directly on the pedalboard effect object
         if hasattr(self.wrapper.effect, param_name):
             setattr(self.wrapper.effect, param_name, value)
 
@@ -323,10 +315,7 @@ class EffectCard(QFrame):
             if hasattr(self.wrapper.effect, "show_editor"):
                 self.wrapper.effect.show_editor()
             else:
-                if hasattr(main_window, 'show_themed_message_box'):
-                    main_window.show_themed_message_box("VST3 Editor", "This plugin does not support a custom editor interface.", QMessageBox.Icon.Warning)
-                else:
-                    QMessageBox.warning(self, "VST3 Editor", "This plugin does not support a custom editor interface.")
+                QMessageBox.warning(self, "VST3 Editor", "This plugin does not support a custom editor interface.")
             
     def mousePressEvent(self, event):
         child = self.childAt(event.pos())
@@ -341,7 +330,6 @@ class EffectCard(QFrame):
     def find_effects_rack(self):
         p = self.parent()
         while p:
-            from widgets.effects_rack import EffectsRack
             if isinstance(p, EffectsRack):
                 return p
             p = p.parent()
@@ -360,8 +348,14 @@ class EffectsRack(QWidget):
         self.audio_engine = audio_engine
         self.selected_track = None
         self.selected_effect_wrapper = None
+        self.signal_flow_widget = None
         
         self.setup_ui()
+
+    def set_signal_flow_widget(self, flow_widget):
+        self.signal_flow_widget = flow_widget
+        if self.selected_track and self.signal_flow_widget:
+            self.signal_flow_widget.set_track(self.selected_track)
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -379,7 +373,6 @@ class EffectsRack(QWidget):
         
         top_bar.addStretch()
         
-        # Dropdown selector to choose effect
         self.combo_fx = QComboBox()
         self.combo_fx.setObjectName("AddEffectCombo")
         self.combo_fx.addItem("Add Built-in Effect...", None)
@@ -392,7 +385,6 @@ class EffectsRack(QWidget):
         self.btn_add.clicked.connect(self.on_add_effect)
         top_bar.addWidget(self.btn_add)
         
-        # Add VST3 button
         self.btn_add_vst = QPushButton("Load VST3...")
         self.btn_add_vst.setObjectName("AddVstButton")
         self.vst_menu = QMenu(self)
@@ -407,6 +399,8 @@ class EffectsRack(QWidget):
         self.scroll_area.setObjectName("RackScrollArea")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         self.scroll_widget = QWidget()
         self.scroll_widget.setObjectName("RackScrollWidget")
@@ -475,10 +469,14 @@ class EffectsRack(QWidget):
     def set_track(self, track):
         """Sets the active track and redraws cards."""
         self.selected_track = track
+        if self.signal_flow_widget:
+            self.signal_flow_widget.set_track(track)
         self.refresh_rack()
         
     def select_card(self, card):
         self.selected_effect_wrapper = card.wrapper if card else None
+        if self.signal_flow_widget:
+            self.signal_flow_widget.refresh_flow()
         
         # Go through all cards and update their selected state
         for i in range(self.scroll_layout.count()):
@@ -488,21 +486,21 @@ class EffectsRack(QWidget):
                 if isinstance(w, EffectCard):
                     w.set_selected(w == card)
         
-        # Now trigger opening the VST settings/placeholder
+        # Trigger opening the VST settings/popup
         main_window = self.window()
         if card:
             if card.wrapper.effect_type == "VST3":
                 if hasattr(main_window, 'open_vst_in_tab'):
                     main_window.open_vst_in_tab(card, card.wrapper)
-            else:
-                if hasattr(main_window, 'show_builtin_placeholder'):
-                    main_window.show_builtin_placeholder(card.wrapper)
         else:
             if hasattr(main_window, 'show_no_vst_placeholder'):
                 main_window.show_no_vst_placeholder()
 
     def refresh_rack(self):
         """Clears and rebuilds the effects list."""
+        if self.signal_flow_widget:
+            self.signal_flow_widget.refresh_flow()
+            
         # Clear existing card widgets (except the spacer stretch)
         while self.scroll_layout.count() > 1:
             child = self.scroll_layout.takeAt(0)
@@ -523,7 +521,6 @@ class EffectsRack(QWidget):
         
         # Verify selected effect wrapper is still in effects list
         if self.selected_effect_wrapper not in self.selected_track.effects:
-            # Fallback to first effect
             if self.selected_track.effects:
                 self.selected_effect_wrapper = self.selected_track.effects[0]
             else:
@@ -542,8 +539,6 @@ class EffectsRack(QWidget):
             else:
                 card.set_selected(False)
                 
-        pass
-            
     def on_add_effect(self):
         if not self.selected_track:
             return
@@ -552,25 +547,25 @@ class EffectsRack(QWidget):
         if not fx_type:
             return
             
-        # Instantiate correct built-in pedalboard class
         effect_obj = None
         try:
             if fx_type == "NoiseGate":
-                effect_obj = NoiseGate(threshold_db=-40, ratio=10, attack_ms=1.0, release_ms=100.0)
+                effect_obj = NoiseGate(threshold_db=-45, ratio=10, attack_ms=1.5, release_ms=80.0)
             elif fx_type == "Distortion":
-                effect_obj = Distortion(drive_db=15)
+                # Upgraded to physical model TubeOverdrive composite pedal
+                effect_obj = TubeOverdrive(drive_db=15.0, tone=0.5, level_db=0.0)
             elif fx_type == "Chorus":
-                effect_obj = Chorus(rate_hz=1.0, depth=0.25, feedback=0.0, mix=0.5)
+                effect_obj = Chorus(rate_hz=1.2, depth=0.3, feedback=0.1, mix=0.4)
             elif fx_type == "Phaser":
                 effect_obj = Phaser(rate_hz=1.0, depth=0.5, feedback=0.0, mix=0.5)
             elif fx_type == "Delay":
                 effect_obj = Delay(delay_seconds=0.3, feedback=0.3, mix=0.4)
             elif fx_type == "Reverb":
-                effect_obj = Reverb(room_size=0.5, damping=0.5, wet_level=0.33, dry_level=0.4, width=1.0)
+                effect_obj = Reverb(room_size=0.6, damping=0.4, wet_level=0.25, dry_level=0.85, width=1.0)
             elif fx_type == "PitchShift":
                 effect_obj = PitchShift(semitones=0)
             elif fx_type == "Compressor":
-                effect_obj = Compressor(threshold_db=-20.0, ratio=4.0, attack_ms=2.0, release_ms=150.0)
+                effect_obj = Compressor(threshold_db=-18.0, ratio=3.5, attack_ms=5.0, release_ms=100.0)
             elif fx_type == "LowpassFilter":
                 effect_obj = LowpassFilter(cutoff_frequency_hz=1500)
             elif fx_type == "HighpassFilter":
@@ -588,7 +583,6 @@ class EffectsRack(QWidget):
             self.selected_track.effects.append(wrapper)
             self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
             
-            # Reset combo box
             self.combo_fx.setCurrentIndex(0)
             self.refresh_rack()
             
@@ -608,7 +602,7 @@ class EffectsRack(QWidget):
         if dlg.exec() == QFileDialog.DialogCode.Accepted:
             file_path = dlg.selectedFiles()[0]
             self.load_scanned_vst3(file_path)
-
+ 
     def populate_vst_menu(self):
         self.vst_menu.clear()
         self.vst_menu.setStyleSheet("""
@@ -640,7 +634,6 @@ class EffectsRack(QWidget):
         if scanned_vsts:
             for name, path in scanned_vsts:
                 action = self.vst_menu.addAction(name)
-                # Capture the path in lambda
                 action.triggered.connect(lambda checked=False, p=path: self.load_scanned_vst3(p))
             self.vst_menu.addSeparator()
             
@@ -657,12 +650,10 @@ class EffectsRack(QWidget):
             self.audio_engine.stop_stream()
             
         try:
-            # Load plugin using safe isolation loader
             from audio_engine import load_vst_plugin
             vst_obj = load_vst_plugin(file_path)
             filename = os.path.splitext(os.path.basename(file_path))[0]
             
-            # Wrap
             wrapper = EffectWrapper(vst_obj, f"VST: {filename}", "VST3", is_active=True)
             wrapper.original_vst_path = file_path
             self.selected_track.effects.append(wrapper)
@@ -675,7 +666,7 @@ class EffectsRack(QWidget):
             if hasattr(main_window, 'show_themed_message_box'):
                 main_window.show_themed_message_box("VST3 Error", err_text, QMessageBox.Icon.Critical)
             else:
-                QMessageBox.critical(self, "VST3 Error", err_text)
+                QMessageBox.warning(self, "VST3 Error", err_text)
         finally:
             if was_running and self.audio_engine:
                 self.audio_engine.start_stream()

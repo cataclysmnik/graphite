@@ -69,77 +69,80 @@ class TimeRulerWidget(QWidget):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        # Draw background
-        painter.fillRect(0, 0, w, h, QColor("#0b0b0c"))
-        painter.setPen(QPen(QColor("#222225"), 1))
-        painter.drawLine(0, h - 1, w, h - 1)
-        
-        # Translate painter horizontally to scroll matching the timeline scroll
-        painter.translate(-self.scroll_offset, 0)
-        
-        # Draw ticks and time strings
-        total_width = w + self.scroll_offset
-        max_seconds = int(total_width / self.pixels_per_second) + 5
-        
-        # Dynamic tick spacing based on zoom levels
-        if self.pixels_per_second < 15.0:
-            tick_step = 10  # Draw labels every 10 seconds
-            sub_step = 2
-        elif self.pixels_per_second < 50.0:
-            tick_step = 5   # Every 5 seconds
-            sub_step = 1
-        elif self.pixels_per_second < 150.0:
-            tick_step = 1   # Every second
-            sub_step = 0.2
-        else:
-            tick_step = 0.5  # Every half-second
-            sub_step = 0.1
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-        font = QFont("Consolas", 8)
-        painter.setFont(font)
-        
-        # Paint grid markers
-        seconds_span = np.arange(0, max_seconds, sub_step)
-        for s in seconds_span:
-            x_pos = int(s * self.pixels_per_second)
-            is_major = abs(s % tick_step) < 1e-5
+            w = self.width()
+            h = self.height()
             
-            if is_major:
-                painter.setPen(QPen(QColor("#88888c"), 1))
-                painter.drawLine(x_pos, h - 12, x_pos, h - 2)
-                
-                # Format time text: M:SS or M:SS.hh
-                minutes = int(s // 60)
-                secs = s % 60
-                if tick_step < 1.0:
-                    time_str = f"{minutes}:{secs:05.2f}"
-                else:
-                    time_str = f"{minutes}:{int(secs):02d}"
-                    
-                painter.drawText(x_pos + 3, h - 14, time_str)
+            # Draw background
+            painter.fillRect(0, 0, w, h, QColor("#0b0b0c"))
+            painter.setPen(QPen(QColor("#222225"), 1))
+            painter.drawLine(0, h - 1, w, h - 1)
+            
+            # Translate painter horizontally to scroll matching the timeline scroll
+            painter.translate(-self.scroll_offset, 0)
+            
+            # Draw ticks and time strings
+            total_width = w + self.scroll_offset
+            max_seconds = int(total_width / self.pixels_per_second) + 5
+            
+            # Dynamic tick spacing based on zoom levels
+            if self.pixels_per_second < 15.0:
+                tick_step = 10  # Draw labels every 10 seconds
+                sub_step = 2
+            elif self.pixels_per_second < 50.0:
+                tick_step = 5   # Every 5 seconds
+                sub_step = 1
+            elif self.pixels_per_second < 150.0:
+                tick_step = 1   # Every second
+                sub_step = 0.2
             else:
-                painter.setPen(QPen(QColor("#222225"), 1))
-                painter.drawLine(x_pos, h - 6, x_pos, h - 2)
+                tick_step = 0.5  # Every half-second
+                sub_step = 0.1
                 
-        # Draw Playhead Cap (Red Triangle)
-        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
-        playhead_sec = self.audio_engine.playhead_samples / sr
-        playhead_x = int(playhead_sec * self.pixels_per_second)
-        
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#ff0033")))
-        
-        points = [
-            QPoint(playhead_x - 6, 2),
-            QPoint(playhead_x + 6, 2),
-            QPoint(playhead_x, 12)
-        ]
-        painter.drawPolygon(points)
+            font = QFont("Consolas", 8)
+            painter.setFont(font)
+            
+            # Paint grid markers
+            seconds_span = np.arange(0, max_seconds, sub_step)
+            for s in seconds_span:
+                x_pos = int(s * self.pixels_per_second)
+                is_major = abs(s % tick_step) < 1e-5
+                
+                if is_major:
+                    painter.setPen(QPen(QColor("#88888c"), 1))
+                    painter.drawLine(x_pos, h - 12, x_pos, h - 2)
+                    
+                    # Format time text: M:SS or M:SS.hh
+                    minutes = int(s // 60)
+                    secs = s % 60
+                    if tick_step < 1.0:
+                        time_str = f"{minutes}:{secs:05.2f}"
+                    else:
+                        time_str = f"{minutes}:{int(secs):02d}"
+                        
+                    painter.drawText(x_pos + 3, h - 14, time_str)
+                else:
+                    painter.setPen(QPen(QColor("#222225"), 1))
+                    painter.drawLine(x_pos, h - 6, x_pos, h - 2)
+                    
+            # Draw Playhead Cap (Red Triangle)
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            playhead_sec = self.audio_engine.playhead_samples / sr
+            playhead_x = int(playhead_sec * self.pixels_per_second)
+            
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor("#ff0033")))
+            
+            points = [
+                QPoint(playhead_x - 6, 2),
+                QPoint(playhead_x + 6, 2),
+                QPoint(playhead_x, 12)
+            ]
+            painter.drawPolygon(points)
+        finally:
+            painter.end()
 
 
 class TimelineLanesWidget(QWidget):
@@ -428,138 +431,141 @@ class TimelineLanesWidget(QWidget):
         
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        
-        w = self.width()
-        h = self.height()
-        
-        # 1. Alternate Track Lane backgrounds
-        tracks = self.audio_engine.tracks
-        for idx in range(len(tracks)):
-            y_pos = idx * self.lane_height
-            bg_color = QColor("#0b0b0c") if idx % 2 == 0 else QColor("#050505")
-            painter.fillRect(0, y_pos, w, self.lane_height, bg_color)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-            # Draw lane bottom border
-            painter.setPen(QPen(QColor("#222225"), 1))
-            painter.drawLine(0, y_pos + self.lane_height - 1, w, y_pos + self.lane_height - 1)
+            w = self.width()
+            h = self.height()
             
-        # 2. Draw Items & Waveforms
-        for t_idx, track in enumerate(tracks):
-            y_center = t_idx * self.lane_height + int(self.lane_height / 2)
-            y_top = t_idx * self.lane_height + 5
-            draw_h = self.lane_height - 10
-            
-            with track.lock:
-                items_copy = list(track.items)
+            # 1. Alternate Track Lane backgrounds
+            tracks = self.audio_engine.tracks
+            for idx in range(len(tracks)):
+                y_pos = idx * self.lane_height
+                bg_color = QColor("#0b0b0c") if idx % 2 == 0 else QColor("#050505")
+                painter.fillRect(0, y_pos, w, self.lane_height, bg_color)
                 
-            # Prepare live recording item if track is recording
-            is_recording = (self.audio_engine.play_state == "recording")
-            live_item = None
-            if is_recording and track.armed:
-                with self.audio_engine.lock:
-                    buffers = self.audio_engine.recording_buffers.get(track.track_id)
-                    if buffers and len(buffers) > 0:
-                        try:
-                            live_data = np.concatenate(buffers)
-                            live_audio_data = np.reshape(live_data, (1, -1))
-                            live_item = AudioItem(
-                                start_sample=self.audio_engine.recording_start_sample,
-                                sample_rate=self.audio_engine.sample_rate,
-                                file_path=None,
-                                audio_data=live_audio_data
-                            )
-                        except Exception as e:
-                            print(f"Error drawing live recording: {e}")
-                            
-            items_to_draw = list(items_copy)
-            if live_item is not None:
-                items_to_draw.append(live_item)
+                # Draw lane bottom border
+                painter.setPen(QPen(QColor("#222225"), 1))
+                painter.drawLine(0, y_pos + self.lane_height - 1, w, y_pos + self.lane_height - 1)
                 
-            for item in items_to_draw:
-                if item.audio_data is None:
-                    continue
+            # 2. Draw Items & Waveforms
+            for t_idx, track in enumerate(tracks):
+                y_center = t_idx * self.lane_height + int(self.lane_height / 2)
+                y_top = t_idx * self.lane_height + 5
+                draw_h = self.lane_height - 10
+                
+                with track.lock:
+                    items_copy = list(track.items)
                     
-                is_live = (item is live_item)
-                
-                # Calculate coordinates
-                item_len = item.length_samples
-                start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
-                end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
-                item_width = max(2, end_x - start_x)
-                
-                # Draw clip block background
-                clip_rect = QRectF(start_x, y_top, item_width, draw_h)
-                if is_live:
-                    painter.setBrush(QBrush(QColor("#2a0a0d")))
-                    painter.setPen(QPen(QColor("#ff0033"), 1.0))
-                elif item == self.selected_item:
-                    painter.setBrush(QBrush(QColor("#000000")))
-                    painter.setPen(QPen(QColor("#ffffff"), 1.5))
-                else:
-                    painter.setBrush(QBrush(QColor("#111112")))
-                    painter.setPen(QPen(QColor("#222225"), 1.0))
-                painter.drawRoundedRect(clip_rect, 4, 4)
-                
-                # Draw WAV Filename text label
-                font = QFont("Consolas", 8, QFont.Weight.Bold)
-                painter.setFont(font)
-                if is_live:
-                    painter.setPen(QColor("#ff0033"))
-                    name_str = "Recording Live..."
-                else:
-                    painter.setPen(QColor("#88888c"))
-                    name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
-                
-                # Clip text to container width
-                metrics = painter.fontMetrics()
-                elided_str = metrics.elidedText(name_str, Qt.TextElideMode.ElideRight, int(item_width - 10))
-                painter.drawText(start_x + 5, y_top + 12, elided_str)
-                
-                # Draw Waveform Outline
-                if is_live:
-                    painter.setPen(QPen(QColor("#ff0033"), 1.0))
-                else:
-                    painter.setPen(QPen(QColor("#e2e2e5"), 1.0))
-                
-                # Sub-sample waveform for speed
-                half_h = int(draw_h / 2.5)
-                # Compute min-max for each pixel column
-                # Map audio_data channel 0
-                ch_data = item.audio_data[0]
-                
-                limit = min(item.offset_samples + item.length_samples, ch_data.shape[0])
-                samples_per_px = item.length_samples / max(1, item_width)
-                
-                for px in range(item_width):
-                    px_start = item.offset_samples + int(px * samples_per_px)
-                    px_end = item.offset_samples + int((px + 1) * samples_per_px)
-                    px_start = min(px_start, limit)
-                    px_end = min(px_end, limit)
+                # Prepare live recording item if track is recording
+                is_recording = (self.audio_engine.play_state == "recording")
+                live_item = None
+                if is_recording and track.armed:
+                    with self.audio_engine.lock:
+                        buffers = self.audio_engine.recording_buffers.get(track.track_id)
+                        if buffers and len(buffers) > 0:
+                            try:
+                                live_data = np.concatenate(buffers)
+                                live_audio_data = np.reshape(live_data, (1, -1))
+                                live_item = AudioItem(
+                                    start_sample=self.audio_engine.recording_start_sample,
+                                    sample_rate=self.audio_engine.sample_rate,
+                                    file_path=None,
+                                    audio_data=live_audio_data
+                                )
+                            except Exception as e:
+                                print(f"Error drawing live recording: {e}")
+                                
+                items_to_draw = list(items_copy)
+                if live_item is not None:
+                    items_to_draw.append(live_item)
                     
-                    if px_start >= limit:
-                        break
-                    chunk = ch_data[px_start:px_end]
-                    if len(chunk) == 0:
+                for item in items_to_draw:
+                    if item.audio_data is None:
                         continue
                         
-                    ch_min = np.min(chunk)
-                    ch_max = np.max(chunk)
+                    is_live = (item is live_item)
                     
-                    line_x = start_x + px
-                    line_y_top = y_center + int(ch_min * half_h)
-                    line_y_bottom = y_center + int(ch_max * half_h)
-                    if line_y_top == line_y_bottom:
-                        line_y_bottom += 1
-                    painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
+                    # Calculate coordinates
+                    item_len = item.length_samples
+                    start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+                    end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
+                    item_width = max(2, end_x - start_x)
                     
-        # 3. Draw Vertical Playhead Cursor Line
-        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
-        playhead_sec = self.audio_engine.playhead_samples / sr
-        playhead_x = int(playhead_sec * self.pixels_per_second)
-        
-        painter.setPen(QPen(QColor("#ff0033"), 1.2))
-        painter.drawLine(playhead_x, 0, playhead_x, h)
+                    # Draw clip block background
+                    clip_rect = QRectF(start_x, y_top, item_width, draw_h)
+                    if is_live:
+                        painter.setBrush(QBrush(QColor("#2a0a0d")))
+                        painter.setPen(QPen(QColor("#ff0033"), 1.0))
+                    elif item == self.selected_item:
+                        painter.setBrush(QBrush(QColor("#000000")))
+                        painter.setPen(QPen(QColor("#ffffff"), 1.5))
+                    else:
+                        painter.setBrush(QBrush(QColor("#111112")))
+                        painter.setPen(QPen(QColor("#222225"), 1.0))
+                    painter.drawRoundedRect(clip_rect, 4, 4)
+                    
+                    # Draw WAV Filename text label
+                    font = QFont("Consolas", 8, QFont.Weight.Bold)
+                    painter.setFont(font)
+                    if is_live:
+                        painter.setPen(QColor("#ff0033"))
+                        name_str = "Recording Live..."
+                    else:
+                        painter.setPen(QColor("#88888c"))
+                        name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
+                    
+                    # Clip text to container width
+                    metrics = painter.fontMetrics()
+                    elided_str = metrics.elidedText(name_str, Qt.TextElideMode.ElideRight, int(item_width - 10))
+                    painter.drawText(start_x + 5, y_top + 12, elided_str)
+                    
+                    # Draw Waveform Outline
+                    if is_live:
+                        painter.setPen(QPen(QColor("#ff0033"), 1.0))
+                    else:
+                        painter.setPen(QPen(QColor("#e2e2e5"), 1.0))
+                    
+                    # Sub-sample waveform for speed
+                    half_h = int(draw_h / 2.5)
+                    # Compute min-max for each pixel column
+                    # Map audio_data channel 0
+                    ch_data = item.audio_data[0]
+                    
+                    limit = min(item.offset_samples + item.length_samples, ch_data.shape[0])
+                    samples_per_px = item.length_samples / max(1, item_width)
+                    
+                    for px in range(item_width):
+                        px_start = item.offset_samples + int(px * samples_per_px)
+                        px_end = item.offset_samples + int((px + 1) * samples_per_px)
+                        px_start = min(px_start, limit)
+                        px_end = min(px_end, limit)
+                        
+                        if px_start >= limit:
+                            break
+                        chunk = ch_data[px_start:px_end]
+                        if len(chunk) == 0:
+                            continue
+                            
+                        ch_min = np.min(chunk)
+                        ch_max = np.max(chunk)
+                        
+                        line_x = start_x + px
+                        line_y_top = y_center + int(ch_min * half_h)
+                        line_y_bottom = y_center + int(ch_max * half_h)
+                        if line_y_top == line_y_bottom:
+                            line_y_bottom += 1
+                        painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
+                        
+            # 3. Draw Vertical Playhead Cursor Line
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            playhead_sec = self.audio_engine.playhead_samples / sr
+            playhead_x = int(playhead_sec * self.pixels_per_second)
+            
+            painter.setPen(QPen(QColor("#ff0033"), 1.2))
+            painter.drawLine(playhead_x, 0, playhead_x, h)
+        finally:
+            painter.end()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
