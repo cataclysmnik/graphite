@@ -18,6 +18,12 @@ class AudioSettingsDialog(QDialog):
         self.setMinimumSize(520, 640)
         self.setObjectName("AudioSettingsDialog")
         
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from theme_utils import apply_dark_titlebar
+        apply_dark_titlebar(self)
+        
         self.setup_ui()
         self.load_settings()
         
@@ -244,118 +250,132 @@ class AudioSettingsDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         main_layout.addWidget(self.button_box)
         
-        # Stylesheet styling to match professional dark theme
+        # Stylesheet styling to match Nothing design aesthetic
         self.setStyleSheet("""
             QDialog#AudioSettingsDialog {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
+                background-color: #000000;
+                color: #ffffff;
             }
             QGroupBox#SettingsGroupBox {
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 margin-top: 10px;
                 padding-top: 15px;
                 color: #ffffff;
+                font-family: "Consolas", monospace;
+                font-weight: bold;
+            }
+            QGroupBox#VstGroupBox {
+                border: 1px solid #333333;
+                border-radius: 0px;
+                margin-top: 10px;
+                padding-top: 15px;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-weight: bold;
             }
             QLabel {
-                color: #b3b3b3;
-                font-family: "Segoe UI", sans-serif;
+                color: #888888;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QComboBox {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #d4d4d4;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                color: #ffffff;
                 padding: 4px 8px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
+            QComboBox:focus {
+                border-color: #ffffff;
+            }
             QComboBox QAbstractItemView {
-                background-color: #252526;
-                color: #d4d4d4;
-                selection-background-color: #4a4a4a;
-                selection-color: #ffffff;
+                background-color: #000000;
+                color: #ffffff;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+                border: 1px solid #333333;
             }
             QCheckBox {
-                color: #d4d4d4;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QCheckBox::indicator {
                 width: 14px;
                 height: 14px;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                background-color: #252526;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                background-color: #000000;
             }
             QCheckBox::indicator:checked {
-                background-color: #888888;
-                border-color: #888888;
+                background-color: #ffffff;
+                border-color: #ffffff;
             }
             QComboBox#RequestInput {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                color: #d4d4d4;
+                background-color: #000000;
+                border: 1px solid #333333;
+                color: #ffffff;
                 padding: 2px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
+            QComboBox#RequestInput:focus {
+                border-color: #ffffff;
+            }
             QPushButton#AsioConfigButton {
-                background-color: transparent;
-                border: 1px solid #888888;
-                border-radius: 3px;
-                color: #888888;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-weight: bold;
                 padding: 6px 12px;
                 font-size: 11px;
                 margin-top: 5px;
             }
             QPushButton#AsioConfigButton:hover {
-                background-color: rgba(255, 255, 255, 0.05);
-                color: #ffffff;
                 border-color: #ffffff;
             }
             QDialogButtonBox QPushButton {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                color: #ffffff;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 padding: 5px 15px;
                 min-width: 70px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QDialogButtonBox QPushButton:hover {
-                background-color: #3e3e42;
-            }
-            QGroupBox#VstGroupBox {
-                border: 1px solid #3e3e42;
-                border-radius: 4px;
-                margin-top: 10px;
-                padding-top: 15px;
-                color: #ffffff;
-                font-weight: bold;
+                border-color: #ffffff;
             }
             QListWidget#VstPathsList {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #d4d4d4;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
                 min-height: 80px;
             }
             QListWidget#VstPathsList::item:selected {
-                background-color: #4a4a4a;
-                color: #ffffff;
+                background-color: #ffffff;
+                color: #000000;
             }
             QPushButton#VstPathButton {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                color: #ffffff;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 padding: 5px 15px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QPushButton#VstPathButton:hover {
-                background-color: #3e3e42;
+                border-color: #ffffff;
             }
         """)
 

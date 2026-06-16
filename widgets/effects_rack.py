@@ -183,46 +183,50 @@ class EffectCard(QFrame):
         # Apply Card Styles
         self.setStyleSheet("""
             EffectCard {
-                background-color: #2a2a2a;
-                border: 1px solid #333333;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
                 border-radius: 4px;
             }
             QPushButton#BypassButton {
+                font-family: "Consolas", "Courier New", monospace;
                 font-weight: bold;
-                font-size: 13px;
-                border-radius: 3px;
-                min-width: 24px;
-                min-height: 24px;
-                max-width: 24px;
-                color: #e0e0e0; /* light gray when active */
-                background-color: #3a3a3a;
-                border: 1px solid #444444;
+                font-size: 11px;
+                border-radius: 4px;
+                min-width: 26px;
+                min-height: 26px;
+                max-width: 26px;
+                max-height: 26px;
+                color: #000000;
+                background-color: #ffffff;
+                border: 1px solid #ffffff;
             }
             QPushButton#BypassButton:checked {
-                color: #888888; /* darker gray when bypassed */
-                background-color: #202020;
-                border-color: #333333;
+                color: #88888c;
+                background-color: #0b0b0c;
+                border-color: #222225;
             }
             QLabel#EffectNameLabel {
                 color: #ffffff;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
                 font-weight: bold;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
             }
             QPushButton#DeleteButton {
-                color: #a63e3e;
+                color: #88888c;
+                font-family: "Consolas", "Courier New", monospace;
                 font-weight: bold;
                 background: transparent;
                 border: none;
                 font-size: 12px;
                 min-width: 20px;
-                max-width: 20px;
+                min-height: 20px;
             }
             QPushButton#DeleteButton:hover {
-                background-color: rgba(166, 62, 62, 0.1);
-                border-radius: 2px;
+                color: #ff0033;
+                background-color: rgba(255, 0, 51, 0.1);
+                border-radius: 10px;
             }
             QLabel#VstPathLabel {
                 color: #888888;
@@ -295,6 +299,15 @@ class EffectCard(QFrame):
             self.vst_dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint)
             self.vst_dialog.resize(600, 400) # Initial size, will adapt
             
+            # Show the dialog immediately
+            self.vst_dialog.show()
+            
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+            from theme_utils import apply_dark_titlebar
+            apply_dark_titlebar(self.vst_dialog)
+
             # Restore previous position if we have one
             if hasattr(self.wrapper, '_last_editor_pos') and self.wrapper._last_editor_pos is not None:
                 self.vst_dialog.move(self.wrapper._last_editor_pos)
@@ -322,9 +335,6 @@ class EffectCard(QFrame):
                     user32.PostMessageW(vst_hwnd_ref[0], WM_CLOSE, 0, 0)
                 event.accept()
             self.vst_dialog.closeEvent = on_close
-            
-            # Show the dialog immediately
-            self.vst_dialog.show()
             
             # Setup WinEventHook to catch the VST window
             EVENT_OBJECT_CREATE = 0x8000
@@ -516,44 +526,47 @@ class EffectsRack(QWidget):
         self.setStyleSheet("""
             QLabel#RackTitle {
                 color: #ffffff;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", "Courier New", monospace;
             }
             QComboBox#AddEffectCombo {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #d4d4d4;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
+                border-radius: 4px;
+                color: #88888c;
                 padding: 5px 10px;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
                 min-width: 150px;
             }
             QPushButton#AddFxButton {
-                background-color: #333333;
-                color: #e0e0e0;
+                background-color: #0b0b0c;
+                color: #88888c;
+                font-family: "Consolas", "Courier New", monospace;
                 font-weight: bold;
-                border: 1px solid #444444;
-                border-radius: 3px;
+                border: 1px solid #222225;
+                border-radius: 4px;
                 padding: 6px 14px;
                 font-size: 11px;
             }
             QPushButton#AddFxButton:hover {
-                background-color: #444444;
+                background-color: #1a1a1c;
                 color: #ffffff;
-                border-color: #555555;
+                border-color: #444448;
             }
             QPushButton#AddVstButton {
-                background-color: transparent;
-                border: 1px solid #444444;
-                border-radius: 3px;
-                color: #d4d4d4;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
+                border-radius: 4px;
+                color: #88888c;
+                font-family: "Consolas", "Courier New", monospace;
                 font-weight: bold;
                 padding: 5px 12px;
                 font-size: 11px;
             }
             QPushButton#AddVstButton:hover {
-                background-color: rgba(255, 255, 255, 0.05);
+                background-color: #1a1a1c;
                 color: #ffffff;
-                border-color: #555555;
+                border-color: #444448;
             }
             #RackScrollArea {
                 background: transparent;
@@ -657,10 +670,10 @@ class EffectsRack(QWidget):
         self.vst_menu.clear()
         self.vst_menu.setStyleSheet("""
             QMenu {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #333333;
-                font-family: "Segoe UI", sans-serif;
+                background-color: #000000;
+                color: #88888c;
+                border: 1px solid #222225;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
             }
             QMenu::item {
@@ -668,12 +681,12 @@ class EffectsRack(QWidget):
                 background-color: transparent;
             }
             QMenu::item:selected {
-                background-color: #4a4a4a;
-                color: #ffffff;
+                background-color: #ffffff;
+                color: #000000;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #333333;
+                background-color: #222225;
                 margin: 4px 0px;
             }
         """)

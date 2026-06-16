@@ -75,8 +75,8 @@ class TimeRulerWidget(QWidget):
         h = self.height()
         
         # Draw background
-        painter.fillRect(0, 0, w, h, QColor("#252526"))
-        painter.setPen(QPen(QColor("#333333"), 1))
+        painter.fillRect(0, 0, w, h, QColor("#0b0b0c"))
+        painter.setPen(QPen(QColor("#222225"), 1))
         painter.drawLine(0, h - 1, w, h - 1)
         
         # Translate painter horizontally to scroll matching the timeline scroll
@@ -110,7 +110,7 @@ class TimeRulerWidget(QWidget):
             is_major = abs(s % tick_step) < 1e-5
             
             if is_major:
-                painter.setPen(QPen(QColor("#888888"), 1))
+                painter.setPen(QPen(QColor("#88888c"), 1))
                 painter.drawLine(x_pos, h - 12, x_pos, h - 2)
                 
                 # Format time text: M:SS or M:SS.hh
@@ -123,7 +123,7 @@ class TimeRulerWidget(QWidget):
                     
                 painter.drawText(x_pos + 3, h - 14, time_str)
             else:
-                painter.setPen(QPen(QColor("#444444"), 1))
+                painter.setPen(QPen(QColor("#222225"), 1))
                 painter.drawLine(x_pos, h - 6, x_pos, h - 2)
                 
         # Draw Playhead Cap (Red Triangle)
@@ -132,7 +132,7 @@ class TimeRulerWidget(QWidget):
         playhead_x = int(playhead_sec * self.pixels_per_second)
         
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor("#ff4444")))
+        painter.setBrush(QBrush(QColor("#ff0033")))
         
         points = [
             QPoint(playhead_x - 6, 2),
@@ -437,11 +437,11 @@ class TimelineLanesWidget(QWidget):
         tracks = self.audio_engine.tracks
         for idx in range(len(tracks)):
             y_pos = idx * self.lane_height
-            bg_color = QColor("#202020") if idx % 2 == 0 else QColor("#242424")
+            bg_color = QColor("#0b0b0c") if idx % 2 == 0 else QColor("#050505")
             painter.fillRect(0, y_pos, w, self.lane_height, bg_color)
             
             # Draw lane bottom border
-            painter.setPen(QPen(QColor("#333333"), 1))
+            painter.setPen(QPen(QColor("#222225"), 1))
             painter.drawLine(0, y_pos + self.lane_height - 1, w, y_pos + self.lane_height - 1)
             
         # 2. Draw Items & Waveforms
@@ -491,24 +491,24 @@ class TimelineLanesWidget(QWidget):
                 # Draw clip block background
                 clip_rect = QRectF(start_x, y_top, item_width, draw_h)
                 if is_live:
-                    painter.setBrush(QBrush(QColor("#452525")))
-                    painter.setPen(QPen(QColor("#a84444"), 1.2))
+                    painter.setBrush(QBrush(QColor("#2a0a0d")))
+                    painter.setPen(QPen(QColor("#ff0033"), 1.0))
                 elif item == self.selected_item:
-                    painter.setBrush(QBrush(QColor("#404854")))
-                    painter.setPen(QPen(QColor("#ffffff"), 2.0))
+                    painter.setBrush(QBrush(QColor("#000000")))
+                    painter.setPen(QPen(QColor("#ffffff"), 1.5))
                 else:
-                    painter.setBrush(QBrush(QColor("#333a42")))
-                    painter.setPen(QPen(QColor("#556070"), 1.2))
+                    painter.setBrush(QBrush(QColor("#111112")))
+                    painter.setPen(QPen(QColor("#222225"), 1.0))
                 painter.drawRoundedRect(clip_rect, 4, 4)
                 
                 # Draw WAV Filename text label
-                font = QFont("Segoe UI", 7, QFont.Weight.Bold)
+                font = QFont("Consolas", 8, QFont.Weight.Bold)
                 painter.setFont(font)
                 if is_live:
-                    painter.setPen(QColor("#e8a0a0"))
+                    painter.setPen(QColor("#ff0033"))
                     name_str = "Recording Live..."
                 else:
-                    painter.setPen(QColor("#a0b0c0"))
+                    painter.setPen(QColor("#88888c"))
                     name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
                 
                 # Clip text to container width
@@ -518,9 +518,9 @@ class TimelineLanesWidget(QWidget):
                 
                 # Draw Waveform Outline
                 if is_live:
-                    painter.setPen(QPen(QColor("#f08080"), 1.0))
+                    painter.setPen(QPen(QColor("#ff0033"), 1.0))
                 else:
-                    painter.setPen(QPen(QColor("#c0d0e0"), 1.0))
+                    painter.setPen(QPen(QColor("#e2e2e5"), 1.0))
                 
                 # Sub-sample waveform for speed
                 half_h = int(draw_h / 2.5)
@@ -558,7 +558,7 @@ class TimelineLanesWidget(QWidget):
         playhead_sec = self.audio_engine.playhead_samples / sr
         playhead_x = int(playhead_sec * self.pixels_per_second)
         
-        painter.setPen(QPen(QColor("#ff4444"), 1.2))
+        painter.setPen(QPen(QColor("#ff0033"), 1.2))
         painter.drawLine(playhead_x, 0, playhead_x, h)
 
     def dragEnterEvent(self, event):
@@ -657,19 +657,20 @@ class TimelineScrollContainer(QWidget):
         self.toolbar.setObjectName("TimelineToolbar")
         self.toolbar.setStyleSheet("""
             QWidget#TimelineToolbar {
-                background-color: #252526;
-                border-bottom: 1px solid #333333;
+                background-color: #000000;
+                border-bottom: 1px solid #222225;
             }
             QPushButton#TransportButton {
-                background-color: #2a2d32;
-                border: 1px solid #3e4249;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
                 border-radius: 4px;
                 padding: 4px 6px;
                 min-width: 28px;
                 min-height: 22px;
             }
             QPushButton#TransportButton:hover {
-                background-color: #3e4249;
+                background-color: #1a1a1c;
+                border-color: #444448;
             }
         """)
         
@@ -760,7 +761,7 @@ class TimelineScrollContainer(QWidget):
         
         self.setStyleSheet("""
             QScrollArea#TimelineScrollArea {
-                background-color: #202020;
+                background-color: #050505;
             }
         """)
         

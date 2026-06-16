@@ -51,6 +51,12 @@ class ExportDialog(QDialog):
         self.setMinimumSize(480, 440)
         self.setObjectName("ExportDialog")
         
+        import sys
+        import os
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from theme_utils import apply_dark_titlebar
+        apply_dark_titlebar(self)
+        
         self.setup_ui()
         self.calculate_project_length()
         self.load_export_settings()
@@ -179,86 +185,108 @@ class ExportDialog(QDialog):
         
         self.toggle_range_inputs()
         
-        # Graphite QSS Styles
+        # Stylesheet styling to match Nothing design aesthetic
         self.setStyleSheet("""
             QDialog {
-                background-color: #1e1e1e;
+                background-color: #000000;
             }
             QGroupBox {
                 border: 1px solid #333333;
-                border-radius: 4px;
+                border-radius: 0px;
                 margin-top: 8px;
                 padding-top: 10px;
-                color: #e0e0e0;
+                color: #ffffff;
                 font-weight: bold;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", monospace;
             }
             QLabel {
-                color: #cccccc;
-                font-family: "Segoe UI", sans-serif;
+                color: #888888;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QLineEdit, QComboBox, QDoubleSpinBox {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                color: #ffffff;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 padding: 4px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
-                border-color: #666666;
+                border-color: #ffffff;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #000000;
+                color: #ffffff;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+                border: 1px solid #333333;
             }
             QPushButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #e0e0e0;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                color: #ffffff;
                 padding: 4px 12px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #3e3e32;
-                color: #ffffff;
+                border-color: #ffffff;
             }
             QPushButton#RenderButton {
-                background-color: #2b5a30;
-                border-color: #2b5a30;
+                background-color: #ffffff;
+                border: 1px solid #ffffff;
                 font-weight: bold;
-                color: white;
+                color: #000000;
             }
             QPushButton#RenderButton:hover {
-                background-color: #35703c;
+                background-color: #000000;
+                color: #ffffff;
+                border-color: #ffffff;
             }
             QPushButton#OpenFolderButton {
-                background-color: #2a2d32;
-                border-color: #3e4249;
-                color: #e0e0e0;
-            }
-            QPushButton#OpenFolderButton:hover {
-                background-color: #3e4249;
+                background-color: #000000;
+                border: 1px solid #333333;
                 color: #ffffff;
             }
+            QPushButton#OpenFolderButton:hover {
+                border-color: #ffffff;
+            }
             QPushButton#OpenFolderButton:disabled {
-                background-color: #1e1e1e;
-                border-color: #2d2d2d;
+                background-color: #000000;
+                border-color: #111111;
                 color: #555555;
             }
             QRadioButton {
-                color: #cccccc;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
             }
-            QProgressBar {
-                background-color: #252526;
+            QRadioButton::indicator {
+                width: 12px;
+                height: 12px;
                 border: 1px solid #333333;
-                border-radius: 3px;
+                border-radius: 6px;
+                background-color: #000000;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #ffffff;
+                border-color: #ffffff;
+            }
+            QProgressBar {
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 text-align: center;
                 color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-size: 10px;
                 height: 16px;
             }
             QProgressBar::chunk {
-                background-color: #2b5a30;
+                background-color: #ffffff;
             }
         """)
         

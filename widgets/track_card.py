@@ -22,9 +22,9 @@ class TrackCard(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumHeight(150)
         self.setObjectName("TrackCard")
+        self.setProperty("selected", False)
         
         self.setup_ui()
-        self.update_selection_style()
         
         # Setup level meter polling timer
         self.poll_timer = QTimer(self)
@@ -34,23 +34,42 @@ class TrackCard(QFrame):
     def setup_ui(self):
         # Master horizontal layout for card contents
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 8, 10, 8)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(12, 10, 10, 10)
+        main_layout.setSpacing(12)
         
         # --- PANEL 1: Track Details & State Buttons ---
         details_layout = QVBoxLayout()
         details_layout.setSpacing(6)
+        
+        # Row 1: Track Number, Name & Delete Button
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(6)
+        
+        # Track Number Badge
+        self.lbl_num = QLabel(f"{self.track.track_id:02d}")
+        self.lbl_num.setObjectName("TrackNumberLabel")
+        header_layout.addWidget(self.lbl_num)
         
         # Editable Track Name
         self.name_edit = QLineEdit(self.track.name)
         self.name_edit.setObjectName("TrackNameEdit")
         self.name_edit.setToolTip("Double-click to rename track")
         self.name_edit.editingFinished.connect(self.on_rename)
-        details_layout.addWidget(self.name_edit)
+        header_layout.addWidget(self.name_edit)
         
-        # State Buttons Row: Mute [M], Solo [S], Arm [R]
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(4)
+        # Sleek small Delete Button
+        self.btn_delete = QPushButton("×")
+        self.btn_delete.setObjectName("DeleteTrackButton")
+        self.btn_delete.setToolTip("Delete Track")
+        self.btn_delete.clicked.connect(self.on_delete_clicked)
+        self.btn_delete.setFixedSize(18, 18)
+        header_layout.addWidget(self.btn_delete)
+        
+        details_layout.addLayout(header_layout)
+        
+        # Row 2: Controls Row (M, S, R, FX)
+        controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(4)
         
         self.btn_mute = QPushButton("M")
         self.btn_mute.setCheckable(True)
@@ -73,12 +92,20 @@ class TrackCard(QFrame):
         self.btn_arm.setToolTip("Arm Track for Input Monitoring")
         self.btn_arm.clicked.connect(self.on_arm_clicked)
         
-        btn_layout.addWidget(self.btn_mute)
-        btn_layout.addWidget(self.btn_solo)
-        btn_layout.addWidget(self.btn_arm)
-        details_layout.addLayout(btn_layout)
+        self.btn_fx = QPushButton("FX")
+        self.btn_fx.setObjectName("FxButton")
+        self.btn_fx.setToolTip("View/edit effects rack for this track")
+        self.btn_fx.clicked.connect(self.on_fx_clicked)
         
-        # Input Channel Selector
+        controls_layout.addWidget(self.btn_mute)
+        controls_layout.addWidget(self.btn_solo)
+        controls_layout.addWidget(self.btn_arm)
+        controls_layout.addWidget(self.btn_fx)
+        controls_layout.addStretch()
+        
+        details_layout.addLayout(controls_layout)
+        
+        # Row 3: Input Channel Selector
         self.combo_input = QComboBox()
         self.combo_input.setObjectName("InputChannelCombo")
         self.combo_input.setToolTip("Select Track Input Channel")
@@ -86,15 +113,9 @@ class TrackCard(QFrame):
         self.combo_input.currentIndexChanged.connect(self.on_input_changed)
         details_layout.addWidget(self.combo_input)
         
-        # Delete track button
-        self.btn_delete = QPushButton("Delete Track")
-        self.btn_delete.setObjectName("DeleteTrackButton")
-        self.btn_delete.clicked.connect(self.on_delete_clicked)
-        details_layout.addWidget(self.btn_delete)
-        
         main_layout.addLayout(details_layout)
         
-        # --- PANEL 2: Panning Knob & FX selector ---
+        # --- PANEL 2: Panning Knob ---
         panning_layout = QVBoxLayout()
         panning_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
@@ -108,13 +129,6 @@ class TrackCard(QFrame):
         )
         self.pan_knob.valueChanged.connect(self.on_pan_changed)
         panning_layout.addWidget(self.pan_knob)
-        
-        # FX Select Button
-        self.btn_fx = QPushButton("VST / FX")
-        self.btn_fx.setObjectName("FxButton")
-        self.btn_fx.setToolTip("View/edit effects rack for this track")
-        self.btn_fx.clicked.connect(self.on_fx_clicked)
-        panning_layout.addWidget(self.btn_fx)
         
         main_layout.addLayout(panning_layout)
         
@@ -144,118 +158,170 @@ class TrackCard(QFrame):
         self.level_meter = LevelMeter()
         main_layout.addWidget(self.level_meter)
         
-        # Apply CSS stylesheets directly (QSS)
         self.setStyleSheet("""
             TrackCard {
-                background-color: #2a2a2a;
-                border: 1px solid #333333;
-                border-left: 4px solid transparent;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
                 border-radius: 4px;
             }
-            QLineEdit#TrackNameEdit {
-                background: transparent;
-                color: #ffffff;
-                border: none;
-                border-bottom: 1px solid transparent;
-                font-family: "Segoe UI", sans-serif;
+            TrackCard[selected="true"] {
+                background-color: #000000;
+                border: 1px solid #ffffff;
+            }
+            TrackCard:hover {
+                border-color: #444448;
+            }
+            
+            QLabel#TrackNumberLabel {
+                color: #555558;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 13px;
                 font-weight: bold;
-                padding-bottom: 2px;
+            }
+            TrackCard[selected="true"] QLabel#TrackNumberLabel {
+                color: #ffffff;
+            }
+            
+            QLineEdit#TrackNameEdit {
+                background: transparent;
+                color: #e2e2e5;
+                border: none;
+                border-bottom: 1px solid transparent;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 13px;
+                font-weight: bold;
+                padding-bottom: 1px;
             }
             QLineEdit#TrackNameEdit:focus {
-                border-bottom: 1px solid #888888;
-                background-color: rgba(255, 255, 255, 0.03);
+                border-bottom: 1px solid #ffffff;
+                color: #ffffff;
             }
-            QPushButton#MuteButton, QPushButton#SoloButton, QPushButton#ArmButton {
+            QLineEdit#TrackNameEdit:hover {
+                background-color: rgba(255, 255, 255, 0.02);
+            }
+            
+            QPushButton#MuteButton, QPushButton#SoloButton, QPushButton#ArmButton, QPushButton#FxButton {
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 10px;
                 font-weight: bold;
-                border-radius: 3px;
+                border-radius: 4px;
                 min-width: 26px;
                 min-height: 26px;
                 max-width: 26px;
-                color: #d4d4d4;
-                background-color: #252526;
-                border: 1px solid #3e3e42;
+                max-height: 26px;
+                color: #88888c;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
             }
-            QPushButton#MuteButton:checked {
-                background-color: #6b5317;
+            QPushButton#MuteButton:hover, QPushButton#SoloButton:hover, QPushButton#ArmButton:hover, QPushButton#FxButton:hover {
+                background-color: #1a1a1c;
                 color: #ffffff;
-                border-color: #6b5317;
+                border-color: #444448;
+            }
+            
+            QPushButton#MuteButton:checked {
+                background-color: #ffffff;
+                color: #000000;
+                border-color: #ffffff;
             }
             QPushButton#SoloButton:checked {
-                background-color: #2b5a30;
-                color: #ffffff;
-                border-color: #2b5a30;
+                background-color: #ffffff;
+                color: #000000;
+                border-color: #ffffff;
             }
             QPushButton#ArmButton:checked {
-                background-color: #802b2b;
+                background-color: #ff0033; /* Nothing brand red */
                 color: #ffffff;
-                border-color: #802b2b;
+                border-color: #ff0033;
             }
+            
+            QPushButton#FxButton[fxState="active"] {
+                background-color: #ffffff;
+                border-color: #ffffff;
+                color: #000000;
+            }
+            QPushButton#FxButton[fxState="inactive"] {
+                background-color: #2a2a2d;
+                border-color: #444448;
+                color: #88888c;
+            }
+            QPushButton#FxButton[fxState="none"] {
+                background-color: #0b0b0c;
+                border-color: #222225;
+                color: #88888c;
+            }
+            
             QComboBox#InputChannelCombo {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #d4d4d4;
-                padding: 4px;
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
+                border-radius: 4px;
+                color: #88888c;
+                padding: 4px 6px;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
+            }
+            QComboBox#InputChannelCombo:hover {
+                border-color: #444448;
+                background-color: #1a1a1c;
+                color: #ffffff;
             }
             QComboBox#InputChannelCombo QAbstractItemView {
-                background-color: #252526;
+                background-color: #0b0b0c;
                 color: #d4d4d4;
-                selection-background-color: #4a4a4a;
+                border: 1px solid #222225;
+                selection-background-color: #222225;
                 selection-color: #ffffff;
             }
+            
             QPushButton#DeleteTrackButton {
                 background-color: transparent;
-                border: 1px solid rgba(166, 62, 62, 0.3);
-                border-radius: 3px;
-                color: #a63e3e;
-                font-size: 10px;
-                padding: 3px;
+                border: none;
+                color: #444448;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0px;
+                margin: 0px;
+                text-align: center;
             }
             QPushButton#DeleteTrackButton:hover {
-                background-color: rgba(166, 62, 62, 0.1);
-                border-color: #a63e3e;
+                color: #ff0033;
+                background-color: rgba(255, 0, 51, 0.1);
+                border-radius: 9px;
             }
-            QPushButton#FxButton {
-                background-color: #2d2d2d;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
-                color: #e0e0e0;
-                font-weight: bold;
-                font-size: 11px;
-                padding: 5px;
-            }
-            QPushButton#FxButton:hover {
-                background-color: #444444;
-                color: #ffffff;
-                border-color: #555555;
-            }
+            
             QSlider#VolumeSlider::groove:vertical {
-                background: #18181c;
-                width: 6px;
-                border-radius: 3px;
+                background: #000000;
+                width: 4px;
+                border-radius: 2px;
             }
             QSlider#VolumeSlider::sub-page:vertical {
-                background: #888888;
-                width: 6px;
-                border-radius: 3px;
+                background: #000000;
+                width: 4px;
+                border-radius: 2px;
+            }
+            QSlider#VolumeSlider::add-page:vertical {
+                background: #ffffff;
+                width: 4px;
+                border-radius: 2px;
             }
             QSlider#VolumeSlider::handle:vertical {
-                background: #505050;
-                border: 1px solid #666;
-                height: 12px;
+                background: #ffffff;
+                border: 1px solid #000000;
+                height: 18px;
+                width: 12px;
                 margin-left: -4px;
                 margin-right: -4px;
-                border-radius: 6px;
+                border-radius: 2px;
             }
             QSlider#VolumeSlider::handle:vertical:hover {
-                background: #888888;
-                border-color: #888888;
+                background: #ffffff;
+                border-color: #ff0033;
             }
+            
             QLabel#VolDbLabel {
-                color: #9d9d9d;
-                font-size: 10px;
+                color: #555558;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 9px;
             }
         """)
 
@@ -282,32 +348,37 @@ class TrackCard(QFrame):
     def update_levels(self):
         """Updates the LED VU level meter with the current peak dB."""
         self.level_meter.set_level(self.track.level_history)
+        self.update_fx_status()
+
+    def update_fx_status(self):
+        """Updates the FX button color to show if effects are loaded and active."""
+        has_active = any(wrap.is_active for wrap in self.track.effects)
+        has_inactive = any(not wrap.is_active for wrap in self.track.effects)
+        
+        if has_active:
+            self.btn_fx.setProperty("fxState", "active")
+        elif has_inactive:
+            self.btn_fx.setProperty("fxState", "inactive")
+        else:
+            self.btn_fx.setProperty("fxState", "none")
+            
+        self.btn_fx.style().unpolish(self.btn_fx)
+        self.btn_fx.style().polish(self.btn_fx)
 
     def set_selected(self, selected):
-        """Sets selected state and updates outline glow."""
+        """Sets selected state and updates dynamic styles."""
         self.is_selected = selected
-        self.update_selection_style()
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
         if selected:
             self.trackSelected.emit(self.track)
-            
+
     def update_selection_style(self):
-        """Updates the styling based on selection state."""
-        if self.is_selected:
-            # Active selected card style (graphite highlight border)
-            self.setStyleSheet(self.styleSheet() + """
-                TrackCard {
-                    border-left: 4px solid #888888;
-                    background-color: #333333;
-                }
-            """)
-        else:
-            # Inactive card style
-            self.setStyleSheet(self.styleSheet() + """
-                TrackCard {
-                    border-left: 4px solid transparent;
-                    background-color: #2a2a2a;
-                }
-            """)
+        """Fallback for backwards compatibility, updates styles using selected property."""
+        self.setProperty("selected", self.is_selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def mousePressEvent(self, event):
         """Select track when clicking anywhere on the card."""

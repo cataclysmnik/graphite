@@ -278,6 +278,20 @@ class Track:
 
 class AudioEngine:
     """Manages sounddevice input/output audio streams and mixing DSP."""
+    def get_system_sample_rate(self):
+        """Queries the system (WASAPI) default sample rate to prevent driver conflicts on Windows."""
+        try:
+            import sounddevice as sd
+            for api in sd.query_hostapis():
+                if "wasapi" in api['name'].lower():
+                    default_out = api.get('default_output_device')
+                    if default_out is not None and default_out >= 0:
+                        dev_info = sd.query_devices(default_out)
+                        return int(dev_info.get('default_samplerate', 44100))
+        except Exception:
+            pass
+        return 44100
+
     def __init__(self):
         self.tracks = []
         
@@ -292,7 +306,7 @@ class AudioEngine:
         self.output_last_channel = 1       # Stereo output default (channels 0 and 1)
         
         self.request_sample_rate = True
-        self.sample_rate = 44100
+        self.sample_rate = self.get_system_sample_rate()
         self.request_block_size = True
         self.block_size = 256
         
@@ -490,7 +504,7 @@ class AudioEngine:
             if out_idx is not None and out_idx >= 0:
                 sr = int(devices[out_idx]['default_samplerate'])
             else:
-                sr = 44100
+                sr = self.get_system_sample_rate()
                 
         bs = self.block_size if self.request_block_size else 0
         

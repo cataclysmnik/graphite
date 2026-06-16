@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QFrame, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QRadialGradient, QLinearGradient
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QRadialGradient
 
 class TunerDial(QWidget):
     """Custom painted needle dial for cents deviation."""
@@ -52,38 +52,18 @@ class TunerDial(QWidget):
         if radius < 50.0:
             radius = 50.0
             
-        # Draw background panel glow
-        painter.fillRect(0, 0, w, h, QColor("#1e1e1e"))
+        # Draw background panel
+        painter.fillRect(0, 0, w, h, QColor("#000000"))
         
-        # Draw target guide arc
+        # Draw target guide arc (single thin gray line instead of colored arcs)
         arc_rect = QRectF(cx - radius, cy - radius, radius * 2.0, radius * 2.0)
-        
-        # Paint color-coded arc segments
-        # Cents range from -50 (left) to +50 (right)
-        # In angular degrees: flat (-50 cents) is 150 deg, center (0 cents) is 90 deg, sharp (+50 cents) is 30 deg.
-        # Draw Flat Arc (Red to Orange)
-        pen_flat = QPen(QColor("#a63e3e"), 4)
-        painter.setPen(pen_flat)
-        painter.drawArc(arc_rect, 110 * 16, 40 * 16) # From -50 to -15 cents (150 to 110 deg)
-        
-        # Draw Near In-tune Arc (Yellow)
-        pen_near = QPen(QColor("#d4a317"), 4)
-        painter.setPen(pen_near)
-        painter.drawArc(arc_rect, 95 * 16, 15 * 16)  # From -15 to -5 cents (110 to 95 deg)
-        painter.drawArc(arc_rect, 70 * 16, 15 * 16)  # From +5 to +15 cents (85 to 70 deg)
-        
-        # Draw In-tune Arc (Vibrant Green)
-        pen_green = QPen(QColor("#2b5a30"), 6)
-        painter.setPen(pen_green)
-        painter.drawArc(arc_rect, 85 * 16, 10 * 16)  # From -5 to +5 cents (95 to 85 deg)
-        
-        # Draw Sharp Arc (Orange to Red)
-        painter.setPen(pen_flat)
-        painter.drawArc(arc_rect, 30 * 16, 40 * 16)  # From +15 to +50 cents (70 to 30 deg)
+        pen_arc = QPen(QColor("#333333"), 1.5)
+        painter.setPen(pen_arc)
+        painter.drawArc(arc_rect, 30 * 16, 120 * 16) # From -50 to +50 cents (150 to 30 deg)
         
         # Draw Tick Marks
-        painter.setPen(QPen(QColor("#555555"), 1))
-        font_ticks = QFont("Segoe UI", 7)
+        painter.setPen(QPen(QColor("#333333"), 1))
+        font_ticks = QFont("Consolas", 8)
         painter.setFont(font_ticks)
         
         for cents_val in range(-50, 51, 10):
@@ -101,17 +81,20 @@ class TunerDial(QWidget):
             x2 = cx + (radius + 5.0) * cos_a
             y2 = cy - (radius + 5.0) * sin_a
             
-            # Make center tick prominent
+            # Make center tick prominent (Nothing Red highlight marker)
             if cents_val == 0:
-                painter.setPen(QPen(QColor("#2b5a30"), 2.5))
+                painter.setPen(QPen(QColor("#ff0033"), 2.5))
                 painter.drawLine(x1 - cos_a * 2.0, y1 + sin_a * 2.0, x2 + cos_a * 2.0, y2 - sin_a * 2.0)
             else:
-                painter.setPen(QPen(QColor("#666666"), 1))
+                painter.setPen(QPen(QColor("#555555"), 1))
                 painter.drawLine(x1, y1, x2, y2)
                 
             # Draw tick labels (-50, 0, +50)
             if cents_val in (-50, 0, 50):
-                painter.setPen(QColor("#888888"))
+                if cents_val == 0:
+                    painter.setPen(QColor("#ff0033")) # Center tick text highlight
+                else:
+                    painter.setPen(QColor("#888888"))
                 lbl_text = f"+{cents_val}" if cents_val > 0 else str(cents_val)
                 if cents_val == 0:
                     lbl_text = "0"
@@ -123,28 +106,24 @@ class TunerDial(QWidget):
         radial_grad = QRadialGradient(cx, cy, 30)
         if self.has_signal:
             if abs(self.smoothed_cents) <= 3.0:
-                # Perfectly in tune glow (green)
-                radial_grad.setColorAt(0, QColor(43, 90, 48, 180))
-                radial_grad.setColorAt(1, QColor(43, 90, 48, 0))
-            elif abs(self.smoothed_cents) <= 15.0:
-                # Slightly out of tune glow (yellow/orange)
-                radial_grad.setColorAt(0, QColor(212, 163, 23, 100))
-                radial_grad.setColorAt(1, QColor(212, 163, 23, 0))
+                # Perfectly in tune glow (Nothing Red)
+                radial_grad.setColorAt(0, QColor(255, 0, 51, 80))
+                radial_grad.setColorAt(1, QColor(255, 0, 51, 0))
             else:
-                # Far out of tune glow (red)
-                radial_grad.setColorAt(0, QColor(166, 62, 62, 100))
-                radial_grad.setColorAt(1, QColor(166, 62, 62, 0))
+                # Out of tune glow (white/gray)
+                radial_grad.setColorAt(0, QColor(255, 255, 255, 30))
+                radial_grad.setColorAt(1, QColor(255, 255, 255, 0))
         else:
             # Idle/no signal glow
-            radial_grad.setColorAt(0, QColor(80, 80, 80, 50))
-            radial_grad.setColorAt(1, QColor(80, 80, 80, 0))
+            radial_grad.setColorAt(0, QColor(50, 50, 50, 10))
+            radial_grad.setColorAt(1, QColor(50, 50, 50, 0))
             
         painter.setBrush(QBrush(radial_grad))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QPointF(cx, cy), radius * 0.7, radius * 0.7)
 
         # Draw central note guidelines circle
-        painter.setPen(QPen(QColor("#333333"), 1.5))
+        painter.setPen(QPen(QColor("#222225"), 1.5))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(QPointF(cx, cy), 16, 16)
         
@@ -159,20 +138,18 @@ class TunerDial(QWidget):
         # Choose needle color based on tuning accuracy
         if self.has_signal:
             if abs(self.smoothed_cents) <= 3.0:
-                needle_color = QColor("#4caf50") # In tune green
-            elif abs(self.smoothed_cents) <= 15.0:
-                needle_color = QColor("#ffeb3b") # Near in tune yellow
+                needle_color = QColor("#ff0033") # Nothing brand red
             else:
-                needle_color = QColor("#f44336") # Out of tune red
+                needle_color = QColor("#ffffff") # Pure white
         else:
-            needle_color = QColor("#555555") # Inactive gray
+            needle_color = QColor("#333333") # Inactive dark gray
             
         # Draw needle line
         painter.setPen(QPen(needle_color, 2))
         painter.drawLine(cx, cy, nx, ny)
         
         # Draw needle cap pivot
-        painter.setPen(QPen(QColor("#252526"), 2))
+        painter.setPen(QPen(QColor("#000000"), 2))
         painter.setBrush(QBrush(needle_color))
         painter.drawEllipse(QPointF(cx, cy), 6, 6)
 
@@ -201,7 +178,7 @@ class GuitarTunerWidget(QWidget):
         toolbar.setSpacing(15)
         
         title = QLabel("GUITAR TUNER")
-        title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        title.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
         title.setStyleSheet("color: #ffffff; letter-spacing: 1.0px;")
         toolbar.addWidget(title)
         
@@ -209,8 +186,8 @@ class GuitarTunerWidget(QWidget):
         
         # A4 reference calibration label
         ref_label = QLabel("A4 Reference:")
-        ref_label.setFont(QFont("Segoe UI", 9))
-        ref_label.setStyleSheet("color: #b3b3b3;")
+        ref_label.setFont(QFont("Consolas", 9))
+        ref_label.setStyleSheet("color: #888888;")
         toolbar.addWidget(ref_label)
         
         # Spinbox for calibration input
@@ -223,14 +200,17 @@ class GuitarTunerWidget(QWidget):
         self.spin_a4.setMinimumWidth(85)
         self.spin_a4.setStyleSheet("""
             QSpinBox#TunerRefSpinbox {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 color: #ffffff;
                 padding: 4px 6px;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
                 font-weight: bold;
+            }
+            QSpinBox#TunerRefSpinbox:focus {
+                border-color: #ffffff;
             }
         """)
         toolbar.addWidget(self.spin_a4)
@@ -249,9 +229,9 @@ class GuitarTunerWidget(QWidget):
         self.note_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.note_card.setStyleSheet("""
             QFrame#NoteCard {
-                background-color: #252526;
-                border: 1px solid #333333;
-                border-radius: 6px;
+                background-color: #000000;
+                border: 1px solid #222225;
+                border-radius: 0px;
             }
         """)
         
@@ -266,16 +246,16 @@ class GuitarTunerWidget(QWidget):
         self.lbl_note.setStyleSheet("color: #555555;") # Inactive gray
         card_layout.addWidget(self.lbl_note)
         
-        self.lbl_cents = QLabel("No Signal")
-        self.lbl_cents.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.lbl_cents = QLabel("NO SIGNAL")
+        self.lbl_cents.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
         self.lbl_cents.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_cents.setStyleSheet("color: #888888;")
+        self.lbl_cents.setStyleSheet("color: #555555;")
         card_layout.addWidget(self.lbl_cents)
         
         self.lbl_frequency = QLabel("- Hz")
         self.lbl_frequency.setFont(QFont("Consolas", 9))
         self.lbl_frequency.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_frequency.setStyleSheet("color: #666666;")
+        self.lbl_frequency.setStyleSheet("color: #555555;")
         card_layout.addWidget(self.lbl_frequency)
         
         body_layout.addWidget(self.note_card)
@@ -289,7 +269,8 @@ class GuitarTunerWidget(QWidget):
         # General CSS stylesheet
         self.setStyleSheet("""
             QLabel {
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", monospace;
+                color: #ffffff;
             }
         """)
 
@@ -384,21 +365,15 @@ class GuitarTunerWidget(QWidget):
             self.lbl_note.setText(note_str)
             self.lbl_frequency.setText(f"{freq:.1f} Hz")
             
+            self.lbl_note.setStyleSheet("color: #ffffff;")
+            self.lbl_frequency.setStyleSheet("color: #ffffff;")
+            self.lbl_cents.setStyleSheet("color: #ffffff;")
+            
             if abs(cents_dev) <= 3.0:
-                self.lbl_note.setStyleSheet("color: #4caf50;") # Green
-                self.lbl_cents.setText("In Tune")
-                self.lbl_cents.setStyleSheet("color: #4caf50;")
+                self.lbl_cents.setText("IN TUNE")
             else:
-                # Orange/Yellow if close, Red if far
-                if abs(cents_dev) <= 15.0:
-                    self.lbl_note.setStyleSheet("color: #ffeb3b;") # Yellow
-                    self.lbl_cents.setStyleSheet("color: #ffeb3b;")
-                else:
-                    self.lbl_note.setStyleSheet("color: #ff5722;") # Orange-Red
-                    self.lbl_cents.setStyleSheet("color: #ff5722;")
-                    
                 cents_prefix = "+" if cents_dev > 0 else ""
-                self.lbl_cents.setText(f"{cents_prefix}{cents_dev:.0f} cents")
+                self.lbl_cents.setText(f"{cents_prefix}{cents_dev:.0f} CENTS")
                 
             # Update Dial Needle
             self.dial.set_cents(cents_dev, True)
@@ -408,9 +383,10 @@ class GuitarTunerWidget(QWidget):
     def show_inactive(self):
         self.lbl_note.setText("--")
         self.lbl_note.setStyleSheet("color: #555555;")
-        self.lbl_cents.setText("No Signal")
-        self.lbl_cents.setStyleSheet("color: #888888;")
+        self.lbl_cents.setText("NO SIGNAL")
+        self.lbl_cents.setStyleSheet("color: #555555;")
         self.lbl_frequency.setText("- Hz")
+        self.lbl_frequency.setStyleSheet("color: #555555;")
         self.dial.set_cents(0.0, False)
 
     def closeEvent(self, event):

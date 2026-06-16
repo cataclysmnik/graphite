@@ -184,7 +184,7 @@ def load_project(file_path, audio_engine):
         audio_engine.output_first_channel = globals_cfg.get("output_first_channel", 0)
         audio_engine.output_last_channel = globals_cfg.get("output_last_channel", 1)
         audio_engine.request_sample_rate = globals_cfg.get("request_sample_rate", True)
-        audio_engine.sample_rate = globals_cfg.get("sample_rate", 44100)
+        audio_engine.sample_rate = globals_cfg.get("sample_rate", audio_engine.get_system_sample_rate())
         audio_engine.request_block_size = globals_cfg.get("request_block_size", True)
         audio_engine.block_size = globals_cfg.get("block_size", 256)
         audio_engine.thread_priority = globals_cfg.get("thread_priority", "ASIO Default / MMCSS Pro Audio / Time Critical")

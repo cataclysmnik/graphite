@@ -29,14 +29,14 @@ class MetronomePendulum(QWidget):
         h = self.height()
         
         # Fill background
-        painter.fillRect(0, 0, w, h, QColor("#1e1e1e"))
+        painter.fillRect(0, 0, w, h, QColor("#000000"))
         
         # Core geometry
         cx = w / 2.0
         # Pivot point of the pendulum is near the bottom of the body
         pivot_y = h - 35.0
         
-        # 1. Draw Metronome body (Wooden/Metal Pyramid)
+        # 1. Draw Metronome body (Pyramid)
         body = QPolygonF([
             QPointF(cx - 15.0, 30.0),
             QPointF(cx + 15.0, 30.0),
@@ -44,23 +44,23 @@ class MetronomePendulum(QWidget):
             QPointF(cx - 55.0, h - 20.0)
         ])
         
-        painter.setBrush(QBrush(QColor("#252526")))
-        painter.setPen(QPen(QColor("#3c3f41"), 1.5))
+        painter.setBrush(QBrush(QColor("#000000")))
+        painter.setPen(QPen(QColor("#222225"), 1.5))
         painter.drawPolygon(body)
         
-        # Draw inner face plate (lighter gray)
+        # Draw inner face plate
         face_plate = QPolygonF([
             QPointF(cx - 10.0, 45.0),
             QPointF(cx + 10.0, 45.0),
             QPointF(cx + 38.0, h - 30.0),
             QPointF(cx - 38.0, h - 30.0)
         ])
-        painter.setBrush(QBrush(QColor("#2d2d30")))
-        painter.setPen(QPen(QColor("#202020"), 1))
+        painter.setBrush(QBrush(QColor("#050505")))
+        painter.setPen(QPen(QColor("#222225"), 1))
         painter.drawPolygon(face_plate)
         
         # Draw tempo markings / guidelines on the face plate
-        painter.setPen(QPen(QColor("#404040"), 1))
+        painter.setPen(QPen(QColor("#222225"), 1))
         for y_pos in range(int(45.0 + 15.0), int(h - 40.0), 20):
             # Guidelines lines
             width_at_y = 15.0 + (y_pos - 45.0) * 0.18
@@ -93,12 +93,10 @@ class MetronomePendulum(QWidget):
         rx = cx + rod_len * math.sin(angle_rad)
         ry = pivot_y - rod_len * math.cos(angle_rad)
         
-        painter.setPen(QPen(QColor("#a0a0a0"), 2))
+        painter.setPen(QPen(QColor("#ffffff"), 2))
         painter.drawLine(cx, pivot_y, rx, ry)
         
         # Draw the sliding weight block on the rod
-        # Height of the weight changes based on BPM (faster BPM = lower weight, slower = higher weight)
-        # Standard metronome physics: BPM range 40 - 240
         bpm_percent = (bpm - 40.0) / (240.0 - 40.0) # 0.0 to 1.0
         weight_dist = 40.0 + (1.0 - bpm_percent) * (rod_len - 60.0)
         
@@ -107,17 +105,17 @@ class MetronomePendulum(QWidget):
         
         # Draw rectangular weight
         weight_rect = QRectF(wx - 10.0, wy - 8.0, 20.0, 16.0)
-        painter.setBrush(QBrush(QColor("#a63e3e"))) # Accent red weight
-        painter.setPen(QPen(QColor("#ffffff"), 1))
-        painter.drawRoundedRect(weight_rect, 2, 2)
+        painter.setBrush(QBrush(QColor("#ffffff"))) # Clean white weight block
+        painter.setPen(QPen(QColor("#000000"), 1)) # Black border
+        painter.drawRoundedRect(weight_rect, 0, 0) # Square aesthetic
         
         # Draw pivot cap at base
-        painter.setBrush(QBrush(QColor("#505050")))
-        painter.setPen(QPen(QColor("#202020"), 1))
+        painter.setBrush(QBrush(QColor("#222225")))
+        painter.setPen(QPen(QColor("#333333"), 1))
         painter.drawEllipse(QPointF(cx, pivot_y), 5, 5)
         
         # 4. Draw Beat Flashing LED
-        # Determine if currently flashing (first 10% of a beat)
+        # Determine if currently flashing (first 15% of a beat)
         beat_number = int((playhead / samples_per_beat) % self.audio_engine.time_sig_numerator)
         flash_duration = min(4410, int(samples_per_beat * 0.15))
         is_flashing = play_active and (playhead % samples_per_beat < flash_duration)
@@ -127,20 +125,20 @@ class MetronomePendulum(QWidget):
         
         if is_flashing:
             if beat_number == 0:
-                # Accented beat 1 (vibrant green)
-                led_grad.setColorAt(0, QColor("#4caf50"))
-                led_grad.setColorAt(1, QColor(76, 175, 80, 0))
-                led_color = QColor("#81c784")
+                # Accented beat 1 (glowing pure white)
+                led_grad.setColorAt(0, QColor("#ffffff"))
+                led_grad.setColorAt(1, QColor(255, 255, 255, 0))
+                led_color = QColor("#ffffff")
             else:
-                # Unaccented beats (glowing amber)
-                led_grad.setColorAt(0, QColor("#ffc107"))
-                led_grad.setColorAt(1, QColor(255, 193, 7, 0))
-                led_color = QColor("#ffe082")
+                # Unaccented beats (glowing medium gray)
+                led_grad.setColorAt(0, QColor("#888888"))
+                led_grad.setColorAt(1, QColor(136, 136, 136, 0))
+                led_color = QColor("#aaaaaa")
         else:
-            # Idle LED (dim gray)
-            led_grad.setColorAt(0, QColor("#333333"))
-            led_grad.setColorAt(1, QColor(51, 51, 51, 0))
-            led_color = QColor("#444444")
+            # Idle LED (dim gray/black)
+            led_grad.setColorAt(0, QColor("#111111"))
+            led_grad.setColorAt(1, QColor(17, 17, 17, 0))
+            led_color = QColor("#222225")
             
         painter.setBrush(QBrush(led_grad))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -205,7 +203,7 @@ class GuitarMetronomeWidget(QWidget):
         # Metronome Enable and Title Row
         title_row = QHBoxLayout()
         self.lbl_title = QLabel("METRONOME")
-        self.lbl_title.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.lbl_title.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
         self.lbl_title.setStyleSheet("color: #ffffff; letter-spacing: 1.0px;")
         title_row.addWidget(self.lbl_title)
         
@@ -225,8 +223,8 @@ class GuitarMetronomeWidget(QWidget):
         bpm_row.setSpacing(8)
         
         self.lbl_bpm = QLabel("BPM:")
-        self.lbl_bpm.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.lbl_bpm.setStyleSheet("color: #b3b3b3;")
+        self.lbl_bpm.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        self.lbl_bpm.setStyleSheet("color: #888888;")
         bpm_row.addWidget(self.lbl_bpm)
         
         self.spin_bpm = QSpinBox()
@@ -256,8 +254,8 @@ class GuitarMetronomeWidget(QWidget):
         time_sig_row.setSpacing(10)
         
         self.lbl_time_sig = QLabel("Time Signature:")
-        self.lbl_time_sig.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.lbl_time_sig.setStyleSheet("color: #b3b3b3;")
+        self.lbl_time_sig.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        self.lbl_time_sig.setStyleSheet("color: #888888;")
         time_sig_row.addWidget(self.lbl_time_sig)
         
         self.combo_time_sig = QComboBox()
@@ -277,8 +275,8 @@ class GuitarMetronomeWidget(QWidget):
         vol_row.setSpacing(10)
         
         self.lbl_vol = QLabel("Volume:")
-        self.lbl_vol.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.lbl_vol.setStyleSheet("color: #b3b3b3;")
+        self.lbl_vol.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
+        self.lbl_vol.setStyleSheet("color: #888888;")
         vol_row.addWidget(self.lbl_vol)
         
         self.slider_vol = QSlider(Qt.Orientation.Horizontal)
@@ -291,7 +289,7 @@ class GuitarMetronomeWidget(QWidget):
         
         self.lbl_vol_db = QLabel(f"{self.audio_engine.metronome_volume_db:+.1f} dB")
         self.lbl_vol_db.setFont(QFont("Consolas", 8))
-        self.lbl_vol_db.setStyleSheet("color: #888888; min-width: 50px;")
+        self.lbl_vol_db.setStyleSheet("color: #ffffff; min-width: 50px;")
         vol_row.addWidget(self.lbl_vol_db)
         
         vol_row.addStretch()
@@ -300,74 +298,95 @@ class GuitarMetronomeWidget(QWidget):
         layout.addLayout(controls_layout)
         layout.setStretch(1, 2)
         
-        # Global stylesheet styling
+        # Global stylesheet styling to match Nothing design aesthetic
         self.setStyleSheet("""
             QPushButton#MetronomeToggleBtn {
-                background-color: #3e4249;
-                border: 1px solid #555555;
-                border-radius: 4px;
-                color: #e0e0e0;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
+                color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-weight: bold;
                 padding: 5px 15px;
                 font-size: 11px;
             }
+            QPushButton#MetronomeToggleBtn:hover {
+                border-color: #ffffff;
+            }
             QPushButton#MetronomeToggleBtn:checked {
-                background-color: #2b5a30;
-                border-color: #43a047;
-                color: #ffffff;
+                background-color: #ffffff;
+                border-color: #ffffff;
+                color: #000000;
             }
             QPushButton#TapTempoBtn {
-                background-color: #2d2d2d;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 color: #ffffff;
+                font-family: "Consolas", monospace;
                 font-weight: bold;
                 font-size: 10px;
                 padding: 5px 10px;
             }
             QPushButton#TapTempoBtn:hover {
-                background-color: #444444;
+                border-color: #ffffff;
             }
             QSpinBox#BpmSpinbox {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 color: #ffffff;
                 padding: 4px 6px;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
                 font-weight: bold;
             }
+            QSpinBox#BpmSpinbox:focus {
+                border-color: #ffffff;
+            }
             QComboBox#TimeSigCombo {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 3px;
+                background-color: #000000;
+                border: 1px solid #333333;
+                border-radius: 0px;
                 color: #ffffff;
                 padding: 4px 10px;
+                font-family: "Consolas", monospace;
                 font-size: 11px;
                 font-weight: bold;
                 min-width: 90px;
             }
+            QComboBox#TimeSigCombo:focus {
+                border-color: #ffffff;
+            }
+            QComboBox#TimeSigCombo QAbstractItemView {
+                background-color: #000000;
+                color: #ffffff;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+                border: 1px solid #333333;
+            }
             QSlider#BpmSlider::groove:horizontal, QSlider#MetronomeVolSlider::groove:horizontal {
-                background: #18181c;
-                height: 6px;
-                border-radius: 3px;
+                background: #111111;
+                height: 4px;
+                border: 1px solid #222225;
+                border-radius: 0px;
             }
             QSlider#BpmSlider::sub-page:horizontal, QSlider#MetronomeVolSlider::sub-page:horizontal {
-                background: #888888;
-                height: 6px;
-                border-radius: 3px;
+                background: #ffffff;
+                height: 4px;
             }
             QSlider#BpmSlider::handle:horizontal, QSlider#MetronomeVolSlider::handle:horizontal {
-                background: #505050;
-                border: 1px solid #666;
-                width: 12px;
-                margin-top: -3px;
-                margin-bottom: -3px;
-                border-radius: 6px;
+                background: #ffffff;
+                border: 1px solid #ffffff;
+                width: 8px;
+                height: 12px;
+                margin-top: -4px;
+                margin-bottom: -4px;
+                border-radius: 0px;
             }
             QLabel {
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", monospace;
+                color: #ffffff;
             }
         """)
 

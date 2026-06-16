@@ -267,87 +267,89 @@ class MainWindow(QMainWindow):
         # --- FLAT GRAPHITE QSS STYLESHEET ---
         self.setStyleSheet("""
             QMainWindow#MainWindow {
-                background-color: #1e1e1e;
+                background-color: #0b0b0c;
             }
             QTabWidget::pane {
-                border: 1px solid #333333;
-                background-color: #1e1e1e;
+                border: 1px solid #222225;
+                background-color: #0b0b0c;
             }
             QTabBar::tab {
-                background-color: #252526;
-                color: #888888;
-                border: 1px solid #333333;
+                background-color: #000000;
+                color: #88888c;
+                border: 1px solid #222225;
                 border-bottom-color: transparent;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
                 padding: 6px 15px;
-                font-family: "Segoe UI", sans-serif;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
                 font-weight: bold;
             }
             QTabBar::tab:selected {
-                background-color: #1e1e1e;
+                background-color: #0b0b0c;
                 color: #ffffff;
-                border-bottom-color: #1e1e1e;
+                border-bottom-color: #0b0b0c;
             }
             QTabBar::tab:hover {
-                background-color: #2d2d2d;
+                background-color: #1a1a1c;
                 color: #ffffff;
             }
             #CentralWidget {
-                background-color: #1e1e1e;
+                background-color: #0b0b0c;
             }
             QLabel {
-                color: #e0e0e0;
-                font-family: "Inter", sans-serif;
+                color: #e2e2e5;
+                font-family: "Consolas", "Courier New", monospace;
             }
             #BottomBar {
-                background-color: #252526;
-                border: 1px solid #333333;
-                border-radius: 6px;
+                background-color: #000000;
+                border: 1px solid #222225;
+                border-radius: 4px;
             }
             QPushButton#SettingsButton:hover {
                 background-color: rgba(255, 255, 255, 0.05);
                 color: #ffffff;
-                border-color: #555555;
+                border-color: #444448;
             }
             QPushButton#TransportButton {
-                background-color: #2a2d32;
-                color: #e0e0e0;
-                border: 1px solid #3e4249;
+                background-color: #0b0b0c;
+                color: #88888c;
+                border: 1px solid #222225;
                 border-radius: 4px;
                 padding: 4px 12px;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
                 font-weight: bold;
             }
             QPushButton#TransportButton:hover {
-                background-color: #3e4249;
+                background-color: #1a1a1c;
                 color: #ffffff;
+                border-color: #444448;
             }
             #TracksScrollArea {
                 background: transparent;
             }
             QMenuBar {
-                background-color: #252526;
-                color: #d4d4d4;
-                border-bottom: 1px solid #333333;
-                font-family: "Segoe UI", sans-serif;
+                background-color: #000000;
+                color: #88888c;
+                border-bottom: 1px solid #222225;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
             }
             QMenuBar::item {
                 background-color: transparent;
                 padding: 4px 10px;
-                color: #d4d4d4;
+                color: #88888c;
             }
             QMenuBar::item:selected {
-                background-color: #3e3e42;
-                color: #ffffff;
+                background-color: #ffffff;
+                color: #000000;
             }
             QMenu {
-                background-color: #252526;
-                color: #d4d4d4;
-                border: 1px solid #333333;
-                font-family: "Segoe UI", sans-serif;
+                background-color: #000000;
+                color: #88888c;
+                border: 1px solid #222225;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
             }
             QMenu::item {
@@ -355,12 +357,12 @@ class MainWindow(QMainWindow):
                 background-color: transparent;
             }
             QMenu::item:selected {
-                background-color: #3e3e42;
-                color: #ffffff;
+                background-color: #ffffff;
+                color: #000000;
             }
             QMenu::separator {
                 height: 1px;
-                background-color: #333333;
+                background-color: #222225;
                 margin: 4px 0px;
             }
             #TracksScrollArea {
@@ -370,44 +372,47 @@ class MainWindow(QMainWindow):
                 background: transparent;
             }
             #WorkspaceSplitter::handle {
-                background-color: #333333;
+                background-color: #222225;
                 width: 2px;
             }
             QLabel#StatusLabel {
-                color: #888888;
+                color: #555558;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 11px;
             }
             QLabel#MasterVolLabel {
-                color: #b3b3b3;
+                color: #88888c;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 10px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
             }
             QLabel#MasterDbLabel {
-                color: #888888;
+                color: #555558;
+                font-family: "Consolas", "Courier New", monospace;
                 font-size: 10px;
             }
             QSlider#MasterSlider::groove:horizontal {
-                background: #18181c;
-                height: 6px;
-                border-radius: 3px;
+                background: #000000;
+                height: 4px;
+                border-radius: 0px;
             }
             QSlider#MasterSlider::sub-page:horizontal {
-                background: #888888;
-                height: 6px;
-                border-radius: 3px;
+                background: #ffffff;
+                height: 4px;
+                border-radius: 0px;
             }
             QSlider#MasterSlider::handle:horizontal {
-                background: #505050;
-                border: 1px solid #666;
+                background: #ffffff;
+                border: 1px solid #000000;
                 width: 12px;
                 margin-top: -3px;
                 margin-bottom: -3px;
-                border-radius: 6px;
+                border-radius: 0px;
             }
             QSlider#MasterSlider::handle:horizontal:hover {
-                background: #888888;
-                border-color: #888888;
+                background: #ffffff;
+                border-color: #ff0033;
             }
         """)
 
@@ -445,8 +450,7 @@ class MainWindow(QMainWindow):
         self.audio_engine.selected_track_id = track.track_id if track else None
         for card in self.track_cards:
             if card.track != track:
-                card.is_selected = False
-                card.update_selection_style()
+                card.set_selected(False)
                 
         # Link to effects rack
         self.effects_rack.set_track(track)
@@ -705,12 +709,12 @@ class MainWindow(QMainWindow):
         if state == "playing":
             self.timeline.btn_play_pause.setIcon(self.timeline.icon_pause)
             self.timeline.btn_play_pause.setToolTip("Pause")
-            self.timeline.btn_play_pause.setStyleSheet("background-color: #2b5a30;")
+            self.timeline.btn_play_pause.setStyleSheet("background-color: #ffffff; border-color: #ffffff; color: #000000;")
         else:
             self.timeline.btn_play_pause.setIcon(self.timeline.icon_play)
             self.timeline.btn_play_pause.setToolTip("Play")
             if state == "paused":
-                self.timeline.btn_play_pause.setStyleSheet("background-color: #6b5317;")
+                self.timeline.btn_play_pause.setStyleSheet("background-color: #222225; border-color: #444448; color: #ffffff;")
                 
         if state == "recording":
-            self.timeline.btn_record.setStyleSheet("background-color: #802b2b;")
+            self.timeline.btn_record.setStyleSheet("background-color: #ff0033; border-color: #ff0033; color: #ffffff;")

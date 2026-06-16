@@ -33,9 +33,14 @@ def main():
     
     # Create the DAW Main Window interface
     window = MainWindow(splash=splash)
+    
     window.showMaximized()
     window.raise_()
     window.activateWindow()
+    
+    # Must apply after show() so Windows correctly registers the active native HWND
+    from theme_utils import apply_dark_titlebar
+    apply_dark_titlebar(window)
     
     # Close the splash screen after the main window is fully loaded
     splash.finish(window)
