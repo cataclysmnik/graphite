@@ -145,8 +145,13 @@ class TimelineLanesWidget(QWidget):
         self.lane_height = 150
         
         self.active_drag_item = None
-        self.drag_offset_samples = 0
+        self.active_drag_mode = None  # "move", "resize_left", "resize_right"
         self.drag_track = None
+        self.drag_click_x = 0
+        self.drag_start_sample = 0
+        self.drag_offset_samples = 0
+        self.drag_length_samples = 0
+        self.drag_offset_samples_click = 0
         
         self.selected_item = None
         self.selected_track_for_item = None
@@ -173,7 +178,7 @@ class TimelineLanesWidget(QWidget):
         for track in self.audio_engine.tracks:
             for item in track.items:
                 if item.audio_data is not None:
-                    item_end = (item.start_sample + item.audio_data.shape[1]) / item.sample_rate
+                    item_end = (item.start_sample + item.length_samples) / item.sample_rate
                     max_sec = max(max_sec, item_end + 15.0)  # Pad with 15s
                 
         # Make sure the width expands to cover the current playhead + padding
@@ -185,70 +190,179 @@ class TimelineLanesWidget(QWidget):
         self.resize(w, h)
         self.update()
         
+    def get_hover_state(self, x, y):
+        """
+        Returns (item, track, hover_type) where hover_type can be:
+        - "resize_left"
+        - "resize_right"
+        - "move"
+        - None
+        """
+        track_idx = int(y // self.lane_height)
+        if track_idx < 0 or track_idx >= len(self.audio_engine.tracks):
+            return None, None, None
+            
+        track = self.audio_engine.tracks[track_idx]
+        margin = 8
+        
+        with track.lock:
+            items_copy = list(track.items)
+            
+        best_item = None
+        best_type = None
+        min_dist = float('inf')
+        
+        for item in items_copy:
+            if item.audio_data is None:
+                continue
+            item_start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+            item_end_x = int(((item.start_sample + item.length_samples) / item.sample_rate) * self.pixels_per_second)
+            
+            if item_start_x - margin <= x <= item_end_x + margin:
+                dist_left = abs(x - item_start_x)
+                dist_right = abs(x - item_end_x)
+                
+                # Check near left edge
+                if dist_left <= margin and dist_left < min_dist:
+                    min_dist = dist_left
+                    best_item = item
+                    best_type = "resize_left"
+                # Check near right edge
+                elif dist_right <= margin and dist_right < min_dist:
+                    min_dist = dist_right
+                    best_item = item
+                    best_type = "resize_right"
+                # Inside item
+                elif item_start_x < x < item_end_x:
+                    if min_dist == float('inf'):
+                        best_item = item
+                        best_type = "move"
+                        
+        if best_item:
+            return best_item, track, best_type
+        return None, None, None
+
     def mousePressEvent(self, event):
         self.setFocus()  # Ensure widget gets focus so it can receive key events!
         x = event.position().x()
         y = event.position().y()
         
+        item, track, hover_type = self.get_hover_state(x, y)
+        
+        # Emit track selection even if clicked on empty space
         track_idx = int(y // self.lane_height)
         if track_idx < len(self.audio_engine.tracks):
             self.trackSelected.emit(track_idx)
-            track = self.audio_engine.tracks[track_idx]
             
-            # Check if clicked on a track item
+        if item and track:
+            self.selected_item = item
+            self.selected_track_for_item = track
+            
+            self.active_drag_item = item
+            self.drag_track = track
+            self.active_drag_mode = hover_type
+            
             sample_rate = self.audio_engine.sample_rate
             click_sample = int((x / self.pixels_per_second) * sample_rate)
             
-            clicked_item = None
-            with track.lock:
-                for item in track.items:
-                    if item.audio_data is None:
-                        continue
-                    start = item.start_sample
-                    end = start + item.audio_data.shape[1]
-                    if start <= click_sample <= end:
-                        clicked_item = item
-                        break
-                        
-            if clicked_item:
-                self.selected_item = clicked_item
-                self.selected_track_for_item = track
-                # Start dragging item
-                self.active_drag_item = clicked_item
-                self.drag_track = track
-                self.drag_offset_samples = click_sample - clicked_item.start_sample
+            # Store initial states
+            self.drag_click_x = x
+            self.drag_start_sample = item.start_sample
+            self.drag_offset_samples = item.offset_samples
+            self.drag_length_samples = item.length_samples
+            
+            # For moving: click offset inside the item
+            self.drag_offset_samples_click = click_sample - item.start_sample
+            
+            if hover_type in ("resize_left", "resize_right"):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hover_type == "move":
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            else:
-                self.selected_item = None
-                self.selected_track_for_item = None
-                # Set playhead position on empty lane
-                time_seconds = max(0.0, x / self.pixels_per_second)
-                self.timeClicked.emit(time_seconds)
-                self.active_drag_item = None
             self.update()
         else:
             self.selected_item = None
             self.selected_track_for_item = None
             self.active_drag_item = None
+            self.active_drag_mode = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            
+            # Set playhead position on empty lane
+            time_seconds = max(0.0, x / self.pixels_per_second)
+            self.timeClicked.emit(time_seconds)
             self.update()
             
     def mouseMoveEvent(self, event):
+        x = event.position().x()
+        y = event.position().y()
+        
         if self.active_drag_item:
-            # Handle item move
-            x = event.position().x()
             sample_rate = self.audio_engine.sample_rate
-            new_start = int((x / self.pixels_per_second) * sample_rate) - self.drag_offset_samples
-            new_start = max(0, new_start)
             
-            with self.drag_track.lock:
-                self.active_drag_item.start_sample = new_start
+            if self.active_drag_mode == "move":
+                new_start = int((x / self.pixels_per_second) * sample_rate) - self.drag_offset_samples_click
+                new_start = max(0, new_start)
+                with self.drag_track.lock:
+                    self.active_drag_item.start_sample = new_start
+            
+            elif self.active_drag_mode == "resize_left":
+                timeline_end = self.drag_start_sample + self.drag_length_samples
+                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                delta_samples = mouse_sample - click_mouse_sample
                 
+                new_start = self.drag_start_sample + delta_samples
+                new_start = max(0, new_start)
+                
+                # Minimum length of 50ms
+                min_len = int(0.05 * sample_rate)
+                max_allowed_start = timeline_end - min_len
+                new_start = min(new_start, max_allowed_start)
+                
+                actual_delta = new_start - self.drag_start_sample
+                new_offset = self.drag_offset_samples + actual_delta
+                
+                # Check bounds for new_offset
+                max_offset = self.active_drag_item.audio_data.shape[1] - min_len
+                new_offset = max(0, min(new_offset, max_offset))
+                
+                actual_delta = new_offset - self.drag_offset_samples
+                new_start = self.drag_start_sample + actual_delta
+                new_length = timeline_end - new_start
+                
+                with self.drag_track.lock:
+                    self.active_drag_item.start_sample = new_start
+                    self.active_drag_item.offset_samples = new_offset
+                    self.active_drag_item.length_samples = new_length
+                    
+            elif self.active_drag_mode == "resize_right":
+                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                delta_samples = mouse_sample - click_mouse_sample
+                
+                new_length = self.drag_length_samples + delta_samples
+                min_len = int(0.05 * sample_rate)
+                max_len = self.active_drag_item.audio_data.shape[1] - self.active_drag_item.offset_samples
+                new_length = max(min_len, min(new_length, max_len))
+                
+                with self.drag_track.lock:
+                    self.active_drag_item.length_samples = new_length
+                    
             self.update_geometry()
-            
+        else:
+            # Hover cursor update
+            item, track, hover_type = self.get_hover_state(x, y)
+            if hover_type in ("resize_left", "resize_right"):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hover_type == "move":
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                
     def mouseReleaseEvent(self, event):
         if self.active_drag_item:
             self.active_drag_item = None
             self.drag_track = None
+            self.active_drag_mode = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
             
     def mouseDoubleClickEvent(self, event):
@@ -357,7 +471,7 @@ class TimelineLanesWidget(QWidget):
                 is_live = (item is live_item)
                 
                 # Calculate coordinates
-                item_len = item.audio_data.shape[1]
+                item_len = item.length_samples
                 start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
                 end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
                 item_width = max(2, end_x - start_x)
@@ -401,17 +515,19 @@ class TimelineLanesWidget(QWidget):
                 # Compute min-max for each pixel column
                 # Map audio_data channel 0
                 ch_data = item.audio_data[0]
-                samples_per_pixel = int(item.sample_rate / self.pixels_per_second)
-                if samples_per_pixel < 1:
-                    samples_per_pixel = 1
-                    
+                
+                limit = min(item.offset_samples + item.length_samples, ch_data.shape[0])
+                samples_per_px = item.length_samples / max(1, item_width)
+                
                 for px in range(item_width):
-                    px_start = int(px * samples_per_pixel)
-                    px_end = int(px_start + samples_per_pixel)
+                    px_start = item.offset_samples + int(px * samples_per_px)
+                    px_end = item.offset_samples + int((px + 1) * samples_per_px)
+                    px_start = min(px_start, limit)
+                    px_end = min(px_end, limit)
                     
-                    if px_start >= len(ch_data):
+                    if px_start >= limit:
                         break
-                    chunk = ch_data[px_start:min(px_end, len(ch_data))]
+                    chunk = ch_data[px_start:px_end]
                     if len(chunk) == 0:
                         continue
                         

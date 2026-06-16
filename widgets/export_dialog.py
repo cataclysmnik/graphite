@@ -268,7 +268,7 @@ class ExportDialog(QDialog):
         for track in self.audio_engine.tracks:
             for item in track.items:
                 if item.audio_data is not None:
-                    end_sec = (item.start_sample + item.audio_data.shape[1]) / item.sample_rate
+                    end_sec = (item.start_sample + item.length_samples) / item.sample_rate
                     max_sec = max(max_sec, end_sec)
                     
         # Fallback to 10s if timeline is empty
@@ -358,7 +358,7 @@ class ExportDialog(QDialog):
             for track in self.audio_engine.tracks:
                 for item in track.items:
                     if item.audio_data is not None:
-                        end_sec = (item.start_sample + item.audio_data.shape[1]) / item.sample_rate
+                        end_sec = (item.start_sample + item.length_samples) / item.sample_rate
                         max_sec = max(max_sec, end_sec)
             end_time = max_sec if max_sec > 0 else 10.0
         else:

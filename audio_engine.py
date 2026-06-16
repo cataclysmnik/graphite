@@ -112,9 +112,13 @@ class AudioItem:
         self.sample_rate = sample_rate
         self.file_path = file_path
         self.audio_data = audio_data  # 2D numpy array: shape (channels, samples)
+        self.offset_samples = 0
+        self.length_samples = 0
         
         if file_path and os.path.exists(file_path):
             self.load_from_wav(file_path)
+        elif audio_data is not None:
+            self.length_samples = audio_data.shape[1]
             
     def load_from_wav(self, file_path):
         import wave
@@ -126,6 +130,7 @@ class AudioItem:
                 nframes = w.getnframes()
                 if nframes == 0:
                     self.audio_data = np.zeros((1, 0), dtype=np.float32)
+                    self.length_samples = 0
                     return
                 frames = w.readframes(nframes)
                 if width == 2:
@@ -136,9 +141,11 @@ class AudioItem:
                     self.audio_data = np.reshape(raw_data, (1, -1))
                 else:
                     self.audio_data = np.zeros((1, 0), dtype=np.float32)
+                self.length_samples = self.audio_data.shape[1]
         except Exception as e:
             print(f"Failed to load WAV file {file_path}: {e}")
             self.audio_data = np.zeros((1, 0), dtype=np.float32)
+            self.length_samples = 0
             
     def save_to_wav(self, file_path):
         if self.audio_data is None:
@@ -647,7 +654,7 @@ class AudioEngine:
                                 
                             # Convert item samples to target sample rate
                             item_start = int((item.start_sample / item.sample_rate) * sample_rate)
-                            item_len = int((item.audio_data.shape[1] / item.sample_rate) * sample_rate)
+                            item_len = int((item.length_samples / item.sample_rate) * sample_rate)
                             item_end = item_start + item_len
                             
                             # Check overlap with current render block
@@ -662,8 +669,8 @@ class AudioEngine:
                                 length = overlap_end - overlap_start
                                 
                                 # Resample the sub-segment of item.audio_data to target sample rate
-                                orig_start = int((read_start / sample_rate) * item.sample_rate)
-                                orig_end = int((read_end / sample_rate) * item.sample_rate)
+                                orig_start = item.offset_samples + int((read_start / sample_rate) * item.sample_rate)
+                                orig_end = item.offset_samples + int((read_end / sample_rate) * item.sample_rate)
                                 orig_chunk = item.audio_data[0, orig_start:orig_end]
                                 
                                 if len(orig_chunk) > 0:
@@ -809,7 +816,7 @@ class AudioEngine:
                 for item in items_copy:
                     if item.audio_data is None:
                         continue
-                    item_len = item.audio_data.shape[1]
+                    item_len = item.length_samples
                     item_start = item.start_sample
                     item_end = item_start + item_len
                     
@@ -818,7 +825,7 @@ class AudioEngine:
                     overlap_end = min(curr_playhead + frames, item_end)
                     
                     if overlap_start < overlap_end:
-                        read_offset = overlap_start - item_start
+                        read_offset = (overlap_start - item_start) + item.offset_samples
                         write_offset = overlap_start - curr_playhead
                         length = overlap_end - overlap_start
                         playback_in[write_offset : write_offset + length] += item.audio_data[0, read_offset : read_offset + length]

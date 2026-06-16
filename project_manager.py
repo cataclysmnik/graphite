@@ -141,7 +141,9 @@ def save_project(file_path, audio_engine):
                     item_data = {
                         "start_sample": item.start_sample,
                         "sample_rate": item.sample_rate,
-                        "file_path": rel_path
+                        "file_path": rel_path,
+                        "offset_samples": item.offset_samples,
+                        "length_samples": item.length_samples
                     }
                     track_data["items"].append(item_data)
                     
@@ -229,6 +231,10 @@ def load_project(file_path, audio_engine):
                         sample_rate=item_data["sample_rate"],
                         file_path=abs_path
                     )
+                    if "offset_samples" in item_data:
+                        item.offset_samples = item_data["offset_samples"]
+                    if "length_samples" in item_data:
+                        item.length_samples = item_data["length_samples"]
                     track.items.append(item)
                     
                 audio_engine.tracks.append(track)
