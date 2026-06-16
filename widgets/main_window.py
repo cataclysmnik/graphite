@@ -2,7 +2,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFileDialog, QSplitter, QSlider,
-    QMessageBox, QTabWidget
+    QMessageBox, QTabWidget, QFrame
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon, QAction, QKeySequence
@@ -188,11 +188,27 @@ class MainWindow(QMainWindow):
         self.effects_rack = EffectsRack(self.audio_engine)
         self.bottom_dock.addTab(self.effects_rack, "Effects Rack")
         
+        # Utilities Tab (Tuner and Metronome side-by-side)
+        utility_widget = QWidget()
+        utility_widget.setObjectName("UtilitiesWidget")
+        utility_layout = QHBoxLayout(utility_widget)
+        utility_layout.setContentsMargins(5, 5, 5, 5)
+        utility_layout.setSpacing(10)
+        
         self.tuner_widget = GuitarTunerWidget(self.audio_engine)
-        self.bottom_dock.addTab(self.tuner_widget, "Guitar Tuner")
+        utility_layout.addWidget(self.tuner_widget, 1)
+        
+        # Subtle vertical separator line between them
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("color: #333333; margin: 10px 0;")
+        utility_layout.addWidget(separator)
         
         self.metronome_widget = GuitarMetronomeWidget(self.audio_engine)
-        self.bottom_dock.addTab(self.metronome_widget, "Metronome")
+        utility_layout.addWidget(self.metronome_widget, 1)
+        
+        self.bottom_dock.addTab(utility_widget, "Utilities")
         
         main_splitter.addWidget(self.bottom_dock)
         

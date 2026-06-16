@@ -6,9 +6,19 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFileDialog, QMessageBox, QFrame,
     QPushButton, QLabel
 )
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint, QSize
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint, QSize, QEvent
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QIcon
 from audio_engine import AudioItem
+def get_event_position(event):
+    """Safely extracts the position from a QDropEvent, QDragMoveEvent, or QMouseEvent in Qt6/PySide6."""
+    if hasattr(event, 'position'):
+        pos = event.position()
+        if hasattr(pos, 'toPoint'):
+            return pos.toPoint()
+        return pos
+    elif hasattr(event, 'pos'):
+        return event.pos()
+    return QPoint(0, 0)
 
 class TimeRulerWidget(QWidget):
     """Time ruler widget displayed above the timeline track lanes."""
@@ -141,6 +151,7 @@ class TimelineLanesWidget(QWidget):
     def __init__(self, audio_engine, parent=None):
         super().__init__(parent)
         self.audio_engine = audio_engine
+        self.main_window = None
         self.pixels_per_second = 50.0
         self.lane_height = 150
         
@@ -158,6 +169,7 @@ class TimelineLanesWidget(QWidget):
         
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAcceptDrops(True)
         
     def set_zoom(self, pixels_per_second):
         self.pixels_per_second = pixels_per_second
@@ -549,6 +561,80 @@ class TimelineLanesWidget(QWidget):
         painter.setPen(QPen(QColor("#ff4444"), 1.2))
         painter.drawLine(playhead_x, 0, playhead_x, h)
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def import_files_at_pos(self, x, y, urls):
+        sample_rate = self.audio_engine.sample_rate
+        start_sample = max(0, int((x / self.pixels_per_second) * sample_rate))
+        track_idx = max(0, int(y // self.lane_height))
+        
+        wav_files = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith('.wav')]
+        if not wav_files:
+            return
+            
+        # If dropping below existing tracks, create a new track
+        if track_idx >= len(self.audio_engine.tracks):
+            track = self.audio_engine.add_track("Imported Track")
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.refresh_track_cards()
+        else:
+            track = self.audio_engine.tracks[track_idx]
+            
+        for file_path in wav_files:
+            if os.path.exists(file_path):
+                # Create and load AudioItem
+                item = AudioItem(start_sample, sample_rate, file_path=file_path)
+                if item.audio_data is not None:
+                    with track.lock:
+                        track.items.append(item)
+                    track.update_pedalboard(self.audio_engine.sample_rate)
+                    
+        self.update_geometry()
+
+    def dropEvent(self, event):
+        pos = get_event_position(event)
+        self.import_files_at_pos(pos.x(), pos.y(), event.mimeData().urls())
+        event.acceptProposedAction()
+
+
+class TimelineScrollArea(QScrollArea):
+    """Custom QScrollArea to handle drag and drop and forward events to the lanes widget."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        lanes = self.widget()
+        if lanes and hasattr(lanes, 'import_files_at_pos'):
+            pos = get_event_position(event)
+            pos_in_lanes = lanes.mapFrom(self, pos)
+            lanes.import_files_at_pos(pos_in_lanes.x(), pos_in_lanes.y(), event.mimeData().urls())
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
 
 class TimelineScrollContainer(QWidget):
     """Integrates the ruler, lanes scrollarea, and coordinates scroll updates."""
@@ -557,6 +643,7 @@ class TimelineScrollContainer(QWidget):
         self.audio_engine = audio_engine
         self.main_window = parent
         self.pixels_per_second = 60.0
+        self.setAcceptDrops(True)
         
         self.setup_ui()
         
@@ -647,7 +734,7 @@ class TimelineScrollContainer(QWidget):
         layout.addWidget(self.ruler)
         
         # 3. Scroll area containing the track lanes
-        self.scroll_area = QScrollArea(self)
+        self.scroll_area = TimelineScrollArea(self)
         self.scroll_area.setObjectName("TimelineScrollArea")
         self.scroll_area.setWidgetResizable(False)  # Let Lanes Widget set its size
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -655,6 +742,7 @@ class TimelineScrollContainer(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         self.lanes = TimelineLanesWidget(self.audio_engine, self.scroll_area)
+        self.lanes.main_window = self.main_window
         self.lanes.set_zoom(self.pixels_per_second)
         self.scroll_area.setWidget(self.lanes)
         layout.addWidget(self.scroll_area)
@@ -721,3 +809,22 @@ class TimelineScrollContainer(QWidget):
     def update_track_layout(self):
         # Re-initialize timeline geometry when tracks are added/removed
         self.lanes.update_geometry()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        # Map drop coordinates relative to self.lanes
+        pos = get_event_position(event)
+        pos_in_lanes = self.lanes.mapFrom(self, pos)
+        self.lanes.import_files_at_pos(pos_in_lanes.x(), pos_in_lanes.y(), event.mimeData().urls())
+        event.acceptProposedAction()

@@ -158,6 +158,21 @@ class AudioItem:
             self.length_samples = audio_data.shape[1]
             
     def load_from_wav(self, file_path):
+        # Primary: try soundfile (supports 24-bit, 32-bit float, etc.)
+        try:
+            import soundfile as sf
+            data, sr = sf.read(file_path, dtype='float32')
+            self.sample_rate = sr
+            if data.ndim == 1:
+                self.audio_data = np.reshape(data, (1, -1))
+            else:
+                self.audio_data = data.T  # shape (channels, samples)
+            self.length_samples = self.audio_data.shape[1]
+            return
+        except Exception as e:
+            print(f"soundfile failed to load {file_path}, trying wave module: {e}")
+
+        # Secondary fallback: wave module (only supports 16-bit/8-bit PCM)
         import wave
         try:
             with wave.open(file_path, 'rb') as w:
@@ -166,7 +181,7 @@ class AudioItem:
                 self.sample_rate = w.getframerate()
                 nframes = w.getnframes()
                 if nframes == 0:
-                    self.audio_data = np.zeros((1, 0), dtype=np.float32)
+                    self.audio_data = None
                     self.length_samples = 0
                     return
                 frames = w.readframes(nframes)
@@ -177,16 +192,31 @@ class AudioItem:
                     raw_data = (np.frombuffer(frames, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
                     self.audio_data = np.reshape(raw_data, (1, -1))
                 else:
-                    self.audio_data = np.zeros((1, 0), dtype=np.float32)
-                self.length_samples = self.audio_data.shape[1]
+                    self.audio_data = None
+                
+                if self.audio_data is not None:
+                    self.length_samples = self.audio_data.shape[1]
+                else:
+                    self.length_samples = 0
         except Exception as e:
             print(f"Failed to load WAV file {file_path}: {e}")
-            self.audio_data = np.zeros((1, 0), dtype=np.float32)
+            self.audio_data = None
             self.length_samples = 0
             
     def save_to_wav(self, file_path):
         if self.audio_data is None:
             return
+        # Primary: try soundfile
+        try:
+            import soundfile as sf
+            # soundfile expects (samples, channels)
+            data_to_write = self.audio_data.T
+            sf.write(file_path, data_to_write, self.sample_rate, subtype='PCM_16')
+            return
+        except Exception as e:
+            print(f"soundfile failed to save {file_path}, trying wave module: {e}")
+
+        # Secondary fallback: wave module
         import wave
         try:
             ch = self.audio_data.shape[0]
