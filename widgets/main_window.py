@@ -587,6 +587,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Release audio stream explicitly when app terminates."""
         self.audio_engine.stop_stream()
+        try:
+            from audio_engine import clean_temp_vsts
+            clean_temp_vsts()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def toggle_play_stop(self):

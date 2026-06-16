@@ -165,6 +165,7 @@ class EffectWrapper:
         self.name = name
         self.effect_type = effect_type
         self.is_active = is_active
+        self.original_vst_path = None
 
 
 class Track:
@@ -898,3 +899,68 @@ class AudioEngine:
         if play_active:
             with self.lock:
                 self.playhead_samples += frames
+
+
+_temp_vst_dir = None
+_temp_vst_instances = []
+
+def get_temp_vst_dir():
+    global _temp_vst_dir
+    if _temp_vst_dir is None:
+        import tempfile
+        import os
+        # Create a directory inside system temp dir specifically for Graphite DAW VSTs
+        _temp_vst_dir = tempfile.mkdtemp(prefix="graphite_vst_")
+    return _temp_vst_dir
+
+def clean_temp_vsts():
+    global _temp_vst_dir, _temp_vst_instances
+    import shutil
+    import os
+    # We try to remove all temporary copies
+    for path in _temp_vst_instances:
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.isfile(path):
+                os.remove(path)
+        except Exception:
+            pass
+    _temp_vst_instances.clear()
+    
+    if _temp_vst_dir and os.path.exists(_temp_vst_dir):
+        try:
+            shutil.rmtree(_temp_vst_dir, ignore_errors=True)
+        except Exception:
+            pass
+        _temp_vst_dir = None
+
+def load_vst_plugin(vst_path):
+    """Loads a VST plugin by making a unique copy of its DLL to avoid handle/state collisions."""
+    import uuid
+    import shutil
+    import os
+    from pedalboard import load_plugin
+    
+    if not os.path.exists(vst_path):
+        raise FileNotFoundError(f"VST plugin not found: {vst_path}")
+        
+    # Create a unique subdirectory under the temp VST directory
+    base_temp = get_temp_vst_dir()
+    unique_id = uuid.uuid4().hex[:8]
+    inst_dir = os.path.join(base_temp, f"inst_{unique_id}")
+    os.makedirs(inst_dir, exist_ok=True)
+    
+    # We copy the VST3 bundle (either folder or file)
+    vst_name = os.path.basename(vst_path)
+    temp_path = os.path.join(inst_dir, vst_name)
+    
+    if os.path.isdir(vst_path):
+        shutil.copytree(vst_path, temp_path)
+    else:
+        shutil.copy(vst_path, temp_path)
+        
+    _temp_vst_instances.append(temp_path)
+    
+    # Load from the copied temporary path
+    return load_plugin(temp_path)

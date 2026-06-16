@@ -32,7 +32,10 @@ def serialize_effect(wrapper):
     
     if wrapper.effect_type == "VST3":
         # For VST3 plugins, store path and raw_state
-        data["vst_path"] = getattr(wrapper.effect, "path", "")
+        original_path = getattr(wrapper, "original_vst_path", None)
+        if not original_path:
+            original_path = getattr(wrapper.effect, "path", "")
+        data["vst_path"] = original_path
         try:
             # raw_state is bytes, encode as base64 string
             raw_state = wrapper.effect.raw_state
@@ -60,11 +63,14 @@ def deserialize_effect(data):
             print(f"VST3 file not found: {vst_path}")
             return None
         try:
-            effect_obj = load_plugin(vst_path)
+            from audio_engine import load_vst_plugin
+            effect_obj = load_vst_plugin(vst_path)
             raw_state_b64 = data.get("raw_state", "")
             if raw_state_b64:
                 effect_obj.raw_state = base64.b64decode(raw_state_b64)
-            return EffectWrapper(effect_obj, name, "VST3", is_active)
+            wrapper = EffectWrapper(effect_obj, name, "VST3", is_active)
+            wrapper.original_vst_path = vst_path
+            return wrapper
         except Exception as e:
             print(f"Failed to load VST3 plugin at {vst_path}: {e}")
             return None

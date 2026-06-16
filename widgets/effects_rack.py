@@ -134,7 +134,9 @@ class EffectCard(QFrame):
             vst_layout = QVBoxLayout()
             vst_layout.setSpacing(4)
             
-            vst_path = getattr(self.wrapper.effect, "path", "")
+            vst_path = getattr(self.wrapper, "original_vst_path", None)
+            if not vst_path:
+                vst_path = getattr(self.wrapper.effect, "path", "")
             filename = os.path.basename(vst_path)
             
             self.lbl_vst_path = QLabel(f"Path: {filename}")
@@ -523,12 +525,14 @@ class EffectsRack(QWidget):
             self.audio_engine.stop_stream()
             
         try:
-            # Load plugin using pedalboard
-            vst_obj = load_plugin(file_path)
+            # Load plugin using safe isolation loader
+            from audio_engine import load_vst_plugin
+            vst_obj = load_vst_plugin(file_path)
             filename = os.path.splitext(os.path.basename(file_path))[0]
             
             # Wrap
             wrapper = EffectWrapper(vst_obj, f"VST: {filename}", "VST3", is_active=True)
+            wrapper.original_vst_path = file_path
             self.selected_track.effects.append(wrapper)
             self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
             

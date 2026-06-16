@@ -41,7 +41,16 @@ def main():
     splash.finish(window)
     
     # Run event loop
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    
+    # Clean up temp VSTs on exit
+    try:
+        from audio_engine import clean_temp_vsts
+        clean_temp_vsts()
+    except Exception:
+        pass
+        
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()
