@@ -289,6 +289,19 @@ class AudioEngine:
         self.lock = threading.RLock()
         self.tuner_buffer = TunerBuffer(8192)
         self.selected_track_id = 1
+        
+        # Metronome settings
+        self.metronome_enabled = False
+        self.bpm = 120.0
+        self.time_sig_numerator = 4
+        self.time_sig_denominator = 4
+        self.metronome_volume_db = -12.0
+        self.click_accent = None
+        self.click_normal = None
+        self.metronome_click_pos = -1
+        self.metronome_current_click = None
+        self.precompute_metronome_clicks()
+        
         self.load_settings()
         
     def save_settings(self):
@@ -348,6 +361,14 @@ class AudioEngine:
             self.vst_search_paths = data.get("vst_search_paths", ["C:\\Program Files\\Common Files\\VST3"])
         except Exception as e:
             print(f"Failed to load audio settings: {e}")
+            
+    def precompute_metronome_clicks(self):
+        """Precomputes click waveforms at current sample rate."""
+        length_samples = int(self.sample_rate * 0.04)  # 40ms duration
+        t = np.arange(length_samples) / self.sample_rate
+        decay = np.exp(-t * 120.0)
+        self.click_accent = (np.sin(2 * np.pi * 1000.0 * t) * decay).astype(np.float32)
+        self.click_normal = (np.sin(2 * np.pi * 600.0 * t) * decay).astype(np.float32)
             
     def get_host_apis(self):
         """Returns list of available host APIs (ASIO, WASAPI, MME, DirectSound, WDM-KS)."""
@@ -450,6 +471,11 @@ class AudioEngine:
             self.guitar_loop = precompute_guitar_loop(sr)
             self.guitar_loop_idx = 0
             
+        # Re-initialize metronome clicks if sample rate changed
+        if self.click_accent is None or abs(len(self.click_accent) / 0.04 - sr) > 10.0:
+            self.sample_rate = sr
+            self.precompute_metronome_clicks()
+            
         # 5. Resolve Channels
         num_in_channels = 0
         if self.enable_inputs and in_idx is not None and in_idx >= 0:
@@ -550,6 +576,8 @@ class AudioEngine:
                 was_recording = True
             self.play_state = "stopped"
             self.playhead_samples = 0
+            self.metronome_click_pos = -1
+            self.metronome_current_click = None
         if was_recording:
             self.stop_recording_data()
 
@@ -924,6 +952,44 @@ class AudioEngine:
             else:
                 track.level_history = track.level_history * 0.85 + track_db * 0.15
                 
+        # Metronome click trigger and mixing logic
+        if self.metronome_enabled and play_active:
+            samples_per_beat = (60.0 / self.bpm) * self.sample_rate
+            k_start = int(np.ceil(curr_playhead / samples_per_beat))
+            k_end = int(np.floor((curr_playhead + frames - 1) / samples_per_beat))
+            
+            for k in range(k_start, k_end + 1):
+                write_offset = int(k * samples_per_beat - curr_playhead)
+                is_accent = (k % self.time_sig_numerator == 0)
+                self.metronome_current_click = self.click_accent if is_accent else self.click_normal
+                self.metronome_click_pos = write_offset
+                
+        # Mix the active metronome click
+        if self.metronome_click_pos != -1 and self.metronome_current_click is not None:
+            click_src = self.metronome_current_click
+            pos = self.metronome_click_pos
+            
+            src_start = 0
+            dest_start = 0
+            if pos < 0:
+                src_start = -pos
+                dest_start = 0
+            else:
+                src_start = 0
+                dest_start = pos
+                
+            length = min(len(click_src) - src_start, frames - dest_start)
+            if length > 0:
+                gain = 10.0 ** (self.metronome_volume_db / 20.0)
+                mixed_out[dest_start : dest_start + length, 0] += click_src[src_start : src_start + length] * gain
+                mixed_out[dest_start : dest_start + length, 1] += click_src[src_start : src_start + length] * gain
+                
+            # Update click playhead relative to next block
+            self.metronome_click_pos -= frames
+            if self.metronome_click_pos <= -len(click_src):
+                self.metronome_click_pos = -1
+                self.metronome_current_click = None
+
         # 8. Apply main output gain
         main_gain = 10.0 ** (self.main_volume / 20.0)
         mixed_out *= main_gain

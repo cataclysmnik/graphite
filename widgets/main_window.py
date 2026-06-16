@@ -13,6 +13,7 @@ from widgets.level_meter import LevelMeter
 from widgets.audio_settings import AudioSettingsDialog
 from widgets.timeline import TimelineScrollContainer
 from widgets.tuner import GuitarTunerWidget
+from widgets.metronome import GuitarMetronomeWidget
 import project_manager
 
 class MainWindow(QMainWindow):
@@ -180,7 +181,7 @@ class MainWindow(QMainWindow):
         top_workspace.setSizes([320, 680])
         main_splitter.addWidget(top_workspace)
         
-        # Bottom Dock: Tabbed Mixer & Tuner Panel
+        # Bottom Dock: Tabbed Mixer, Tuner & Metronome Panel
         self.bottom_dock = QTabWidget()
         self.bottom_dock.setObjectName("BottomDockTabs")
         
@@ -189,6 +190,9 @@ class MainWindow(QMainWindow):
         
         self.tuner_widget = GuitarTunerWidget(self.audio_engine)
         self.bottom_dock.addTab(self.tuner_widget, "Guitar Tuner")
+        
+        self.metronome_widget = GuitarMetronomeWidget(self.audio_engine)
+        self.bottom_dock.addTab(self.metronome_widget, "Metronome")
         
         main_splitter.addWidget(self.bottom_dock)
         
