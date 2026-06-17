@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QFileDialog, QSplitter, QSlider,
     QMessageBox, QTabWidget, QFrame, QMenuBar, QSizeGrip, QStackedWidget
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QAction, QKeySequence
 from audio_engine import AudioEngine
 from widgets.track_card import TrackCard
@@ -254,9 +254,14 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         self.update_demo_btn_style()
         
+        self.track_height = 150
+        self.installEventFilter(self)
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().installEventFilter(self)
+        
         # --- 2. MULTI-SPLIT WORKSPACE LAYOUT (Reaper-Style) ---
-        main_splitter = QSplitter(Qt.Orientation.Vertical)
-        main_splitter.setObjectName("MainVerticalSplitter")
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter.setObjectName("MainVerticalSplitter")
         
         top_workspace = QSplitter(Qt.Orientation.Horizontal)
         top_workspace.setObjectName("TopWorkspaceSplitter")
@@ -283,12 +288,47 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         top_workspace.addWidget(self.timeline)
         
         top_workspace.setSizes([320, 680])
-        main_splitter.addWidget(top_workspace)
+        self.main_splitter.addWidget(top_workspace)
         
         # Bottom Dock: Tabbed Mixer, Tuner & Metronome Panel
         self.bottom_dock = QTabWidget()
         self.bottom_dock.setObjectName("BottomDockTabs")
         self.bottom_dock.currentChanged.connect(self.on_tab_changed)
+        
+        # ── Corner widget container ──────────
+        self.corner_widget = QWidget()
+        self.corner_layout = QHBoxLayout(self.corner_widget)
+        self.corner_layout.setContentsMargins(0, 0, 4, 0)
+        self.corner_layout.setSpacing(6)
+        
+        self._dock_pinned = True
+        
+        self.btn_dock_pin = QPushButton("📌 PINNED")
+        self.btn_dock_pin.setObjectName("DockPinBtn")
+        self.btn_dock_pin.setFixedHeight(24)
+        self.btn_dock_pin.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dock_pin.setToolTip("Toggle auto-hide behavior")
+        self.btn_dock_pin.clicked.connect(self.toggle_dock_pin)
+        self.corner_layout.addWidget(self.btn_dock_pin)
+
+        self._dock_collapsed = False
+        self._dock_saved_height = 250
+        
+        self._dock_anim = QVariantAnimation(self)
+        self._dock_anim.setDuration(220)
+        self._dock_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._dock_anim.valueChanged.connect(self._on_dock_anim_value)
+        
+        self.btn_dock_toggle = QPushButton("▼ HIDE")
+        self.btn_dock_toggle.setObjectName("DockToggleBtn")
+        self.btn_dock_toggle.setFixedHeight(24)
+        self.btn_dock_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_dock_toggle.setToolTip("Collapse / expand panel")
+        self.btn_dock_toggle.clicked.connect(self.toggle_bottom_dock)
+        self.corner_layout.addWidget(self.btn_dock_toggle)
+
+        self.bottom_dock.setCornerWidget(self.corner_widget, Qt.Corner.TopRightCorner)
+        self._floating_dock_window = None
         
         # Instantiate effects rack and signal flow
         self.effects_rack = EffectsRack(self.audio_engine)
@@ -329,9 +369,9 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.bottom_dock.addTab(self.mixer_widget, "Mixer")
         self.mixer_widget.rebuild()
         
-        main_splitter.addWidget(self.bottom_dock)
+        self.main_splitter.addWidget(self.bottom_dock)
         
-        main_splitter.setSizes([450, 250])
+        self.main_splitter.setSizes([450, 250])
         
         # main_splitter will be added inside the WORKSPACE tab page below
         
@@ -342,54 +382,13 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         # Build initial track widgets
         self.refresh_track_cards()
         
-        # --- 3. BOTTOM MASTER BAR / STATUS ---
-        bottom_bar = QHBoxLayout()
-        bottom_bar.setObjectName("BottomBar")
-        bottom_bar.setContentsMargins(15, 8, 15, 8)
-        bottom_bar.setSpacing(15)
-        
-        self.lbl_status = QLabel("Audio Engine: RUNNING | Latency: Low Latency Mode")
-        self.lbl_status.setObjectName("StatusLabel")
-        bottom_bar.addWidget(self.lbl_status)
-        
-        bottom_bar.addSpacing(20)
-        
-        bottom_bar.addStretch()
-        
-        # Master Volume Controls
-        lbl_master = QLabel("MASTER VOLUME")
-        lbl_master.setObjectName("MasterVolLabel")
-        bottom_bar.addWidget(lbl_master)
-        
-        self.slider_master = QSlider(Qt.Orientation.Horizontal)
-        self.slider_master.setMinimum(-600)  # -60 dB
-        self.slider_master.setMaximum(60)    # +6 dB
-        self.slider_master.setValue(int(self.audio_engine.main_volume * 10))
-        self.slider_master.setObjectName("MasterSlider")
-        self.slider_master.setMinimumWidth(150)
-        self.slider_master.valueChanged.connect(self.on_master_volume_changed)
-        bottom_bar.addWidget(self.slider_master)
-        
-        self.lbl_master_db = QLabel("0.0 dB")
-        self.lbl_master_db.setObjectName("MasterDbLabel")
-        self.lbl_master_db.setFont(QFont("Consolas", 8))
-        bottom_bar.addWidget(self.lbl_master_db)
-        self.update_master_volume_label(self.audio_engine.main_volume)
-        
-        # Master VU meter (placed horizontally or vertically, level meter is vertical)
-        self.master_level_meter = LevelMeter()
-        self.master_level_meter.setMinimumSize(25, 60)
-        self.master_level_meter.setMaximumHeight(65)
-        bottom_bar.addWidget(self.master_level_meter)
-        
-        # Size grip for frameless resizing
-        size_grip = QSizeGrip(self)
-        bottom_bar.addWidget(size_grip)
+        self.auto_hide_timer = QTimer(self)
+        self.auto_hide_timer.timeout.connect(self.check_auto_hide)
+        self.auto_hide_timer.start(100)
         
 
-        # Lay content out directly — no outer tab wrapper needed
-        content_layout.addWidget(main_splitter)
-        content_layout.addLayout(bottom_bar)
+        # Lay content out directly — no footer bar
+        content_layout.addWidget(self.main_splitter)
         main_layout.addWidget(content_widget)
         
         # --- FLAT GRAPHITE QSS STYLESHEET ---
@@ -420,6 +419,21 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             }
             QTabBar::tab:hover {
                 background-color: #1a1a1c;
+                color: #ffffff;
+            }
+            QPushButton#DockToggleBtn, QPushButton#DockPinBtn {
+                background: transparent;
+                border: 1px solid #333336;
+                color: #888888;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0px 10px;
+                border-radius: 2px;
+                margin: 2px 0px;
+            }
+            QPushButton#DockToggleBtn:hover, QPushButton#DockPinBtn:hover {
+                border-color: #888888;
                 color: #ffffff;
             }
             #CentralWidget {
@@ -663,6 +677,7 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             card.btn_fx.clicked.connect(lambda t=track: self.focus_fx_rack(t))
             
             self.tracks_layout.insertWidget(self.tracks_layout.count() - 1, card)
+            card.setFixedHeight(self.track_height)
             self.track_cards.append(card)
             
         # Select first track if available
@@ -761,9 +776,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                 self.action_stream.setText("Start Audio")
         
         if self.audio_engine.is_running:
-            self.lbl_status.setText("Audio Engine: RUNNING | Low Latency")
+            if hasattr(self, 'lbl_status'):
+                self.lbl_status.setText("Audio Engine: RUNNING | Low Latency")
         else:
-            self.lbl_status.setText("Audio Engine: STOPPED")
+            if hasattr(self, 'lbl_status'):
+                self.lbl_status.setText("Audio Engine: STOPPED")
             
         if hasattr(self, 'timeline') and hasattr(self.timeline, 'btn_play_pause'):
             self.update_transport_ui()
@@ -789,19 +806,123 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             self.update_stream_btn_style()
 
     def on_master_volume_changed(self):
+        if not hasattr(self, 'slider_master'):
+            return
         val_db = self.slider_master.value() / 10.0
         self.audio_engine.main_volume = val_db
         self.update_master_volume_label(val_db)
         
     def update_master_volume_label(self, val_db):
+        if not hasattr(self, 'lbl_master_db'):
+            return
         if val_db <= -60.0:
             self.lbl_master_db.setText("-inf dB")
         else:
             self.lbl_master_db.setText(f"{val_db:+.1f} dB")
 
+    # ── Bottom dock collapse / expand ─────────────────────────────────────────
+
+    def toggle_bottom_dock(self):
+        """Slide the bottom dock closed or open with a smooth animation."""
+        if self._dock_anim.state() == QVariantAnimation.State.Running:
+            self._dock_anim.stop()
+
+        sizes = self.main_splitter.sizes()
+        total = sum(sizes)
+        current_bottom = sizes[1] if len(sizes) > 1 else self.bottom_dock.height()
+
+        tab_h = self.bottom_dock.tabBar().sizeHint().height()
+        if tab_h < 15:
+            tab_h = 28
+
+        if self._dock_collapsed:
+            # Expand: restore saved height
+            target = max(self._dock_saved_height, 180)
+            self.bottom_dock.setMaximumHeight(16777215)  # remove cap
+            self._dock_anim.setStartValue(current_bottom)
+            self._dock_anim.setEndValue(target)
+            self._dock_collapsed = False
+            self.btn_dock_toggle.setText("▼ HIDE")
+        else:
+            # Collapse: save current height
+            if current_bottom > tab_h + 10:
+                self._dock_saved_height = current_bottom
+            self._dock_anim.setStartValue(current_bottom)
+            self._dock_anim.setEndValue(tab_h)
+            self._dock_collapsed = True
+            self.btn_dock_toggle.setText("▲ SHOW")
+
+        self._dock_anim.start()
+
+    def _on_dock_anim_value(self, bottom_h):
+        # We cap the dock height so it can squash past its minimum size
+        self.bottom_dock.setMaximumHeight(bottom_h)
+        # And we force the splitter to give space to the top workspace
+        sizes = self.main_splitter.sizes()
+        total = sum(sizes)
+        top_h = max(0, total - bottom_h)
+        self.main_splitter.setSizes([top_h, bottom_h])
+
+    def toggle_dock_pin(self):
+        self._dock_pinned = not self._dock_pinned
+        if self._dock_pinned:
+            self.btn_dock_pin.setText("📌 PINNED")
+            self.expand_dock()
+        else:
+            self.btn_dock_pin.setText("📍 UNPINNED")
+
+    def check_auto_hide(self):
+        if self._dock_pinned:
+            return
+            
+        from PySide6.QtGui import QCursor
+        global_pos = QCursor.pos()
+        
+        dock_rect = self.bottom_dock.rect()
+        local_pos = self.bottom_dock.mapFromGlobal(global_pos)
+        
+        main_local = self.mapFromGlobal(global_pos)
+        near_bottom = (main_local.y() > self.height() - 40) and (0 <= main_local.x() <= self.width())
+        
+        is_hovering = dock_rect.contains(local_pos) or near_bottom
+        
+        if is_hovering:
+            self.expand_dock()
+        else:
+            self.collapse_dock()
+
+    def expand_dock(self):
+        if not self._dock_collapsed: return
+        self.toggle_bottom_dock()
+        
+    def collapse_dock(self):
+        if self._dock_collapsed: return
+        self.toggle_bottom_dock()
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent, Qt
+        if event.type() == QEvent.Type.Wheel:
+            if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                step = 10 if delta > 0 else -10
+                self.adjust_track_height(step)
+                return True
+        return super().eventFilter(obj, event)
+
+    def adjust_track_height(self, step):
+        self.track_height = max(60, min(300, self.track_height + step))
+        for card in self.track_cards:
+            card.setFixedHeight(self.track_height)
+        if hasattr(self, 'timeline'):
+            self.timeline.lanes.lane_height = self.track_height
+            self.timeline.lanes.update_geometry()
+            self.timeline.lanes.update()
+            self.timeline.update_track_layout()
+
     def update_master_levels(self):
         """Polls main engine peak VU dB and updates GUI meter."""
-        self.master_level_meter.set_level(self.audio_engine.main_level_history)
+        if hasattr(self, 'master_level_meter'):
+            self.master_level_meter.set_level(self.audio_engine.main_level_history)
         if hasattr(self, 'timeline'):
             self.timeline.update_widgets()
 

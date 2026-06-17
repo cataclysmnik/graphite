@@ -17,8 +17,7 @@ class CustomKnob(QWidget):
         self.unit = unit
         self.decimals = decimals
         
-        self.setMinimumSize(65, 85)
-        self.setMaximumSize(90, 110)
+        self.setMinimumSize(65, 95)
         self.last_mouse_pos = QPoint()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -202,19 +201,27 @@ class CustomKnob(QWidget):
             painter.setFont(font_label)
             painter.setPen(QColor("#88888c"))
             
-            # Center parameter name
-            label_y = h - 20
-            painter.drawText(0, label_y, w, 15, Qt.AlignmentFlag.AlignCenter, self.label)
+            # Center parameter name (e.g. "DRIVE", "PAN")
+            label_y = h - 28
+            painter.drawText(0, label_y, w, 13, Qt.AlignmentFlag.AlignCenter, self.label)
             
             # Format the decimal value
-            val_str = f"{self.value:.{self.decimals}f}"
-            if self.unit:
-                val_str += f" {self.unit}"
+            val_str = self.get_value_str()
                 
             font_val = QFont("Consolas", 8)
             painter.setFont(font_val)
             painter.setPen(QColor("#ffffff") if self.is_hovered or self.is_dragging else QColor("#88888c"))
-            painter.drawText(0, h - 8, w, 15, Qt.AlignmentFlag.AlignCenter, val_str)
+            painter.drawText(0, h - 14, w, 13, Qt.AlignmentFlag.AlignCenter, val_str)
         finally:
             painter.end()
 
+    def get_value_str(self) -> str:
+        """Override in subclasses to customise the value display label."""
+        val_str = f"{self.value:.{self.decimals}f}"
+        if self.unit:
+            val_str += f" {self.unit}"
+        return val_str
+
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+        return QSize(80, 100)
