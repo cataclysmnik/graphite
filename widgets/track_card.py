@@ -297,7 +297,14 @@ class TrackCard(QFrame):
         if idx >= 0:
             self.combo_input.setCurrentIndex(idx)
         else:
-            self.combo_input.setCurrentIndex(self.combo_input.count() - 1)  # Default to loop if not found
+            if self.combo_input.count() > 0:
+                # Default to first active input channel or loop, and update track state
+                default_idx = 0
+                self.combo_input.setCurrentIndex(default_idx)
+                self.track.input_channel = self.combo_input.itemData(default_idx)
+            else:
+                self.combo_input.setCurrentIndex(self.combo_input.count() - 1)  # Default to loop if not found
+                self.track.input_channel = "loop"
 
     def update_levels(self):
         """Updates the LED VU level meter with the current peak dB."""

@@ -4,6 +4,7 @@ os.environ["SD_ENABLE_ASIO"] = "1"
 import sounddevice as sd
 import numpy as np
 import threading
+import concurrent.futures
 from pedalboard import Pedalboard, Distortion, HighpassFilter, LowpassFilter, Gain
 
 class KarplusStrongString:
@@ -402,6 +403,7 @@ class AudioEngine:
         self.precompute_metronome_clicks()
         
         self.load_settings()
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 4)))
         
     def save_settings(self):
         """Saves advanced audio engine settings to a JSON file."""
@@ -751,6 +753,7 @@ class AudioEngine:
             if not name:
                 name = f"Track {track_id}"
             new_track = Track(track_id, name)
+            new_track.input_channel = self.input_first_channel
             self.tracks.append(new_track)
             return new_track
             
@@ -924,6 +927,135 @@ class AudioEngine:
         """Callback for output-only audio processing. Console printing is omitted for latency stability."""
         self._process_audio(None, outdata, frames)
         
+    def _process_track_dsp(self, track, indata, demo_input, play_active, is_recording_state, curr_playhead, frames, has_solo):
+        # Skip tracks that are muted or not part of solo routing
+        if track.mute or (has_solo and not track.solo):
+            track.level_history = -60.0
+            return np.zeros(frames, dtype=np.float32), np.zeros(frames, dtype=np.float32)
+            
+        # 1. Fetch real-time input block (if armed)
+        realtime_in = None
+        if track.armed:
+            if track.input_channel == "loop":
+                realtime_in = demo_input
+            elif self.demo_loop_active:
+                realtime_in = demo_input
+            elif indata is not None:
+                try:
+                    ch_idx = int(track.input_channel)
+                    if ch_idx < indata.shape[1]:
+                        realtime_in = indata[:, ch_idx]
+                except (ValueError, TypeError):
+                    pass
+                    
+        if realtime_in is None:
+            realtime_in = np.zeros(frames, dtype=np.float32)
+            
+        # Write realtime_in to tuner circular buffer if track is armed and selected
+        if track.armed and track.track_id == self.selected_track_id:
+            self.tuner_buffer.write(realtime_in)
+            
+        # If recording, append real-time input to recording buffers
+        if is_recording_state and track.armed:
+            with self.lock:
+                if track.track_id not in self.recording_buffers:
+                    self.recording_buffers[track.track_id] = []
+                self.recording_buffers[track.track_id].append(realtime_in.copy())
+                
+        # 2. Fetch playback from recorded items (if play is active)
+        playback_in = np.zeros(frames, dtype=np.float32)
+        if play_active:
+            with track.lock:
+                items_copy = list(track.items)
+            for item in items_copy:
+                if item.audio_data is None:
+                    continue
+                item_len = item.length_samples
+                item_start = item.start_sample
+                item_end = item_start + item_len
+                
+                # Check overlap of item with current playhead
+                overlap_start = max(curr_playhead, item_start)
+                overlap_end = min(curr_playhead + frames, item_end)
+                
+                if overlap_start < overlap_end:
+                    read_offset = (overlap_start - item_start) + item.offset_samples
+                    write_offset = overlap_start - curr_playhead
+                    length = overlap_end - overlap_start
+                    playback_in[write_offset : write_offset + length] += item.audio_data[0, read_offset : read_offset + length]
+                    
+        # Mix real-time input and playback items
+        if track.armed:
+            track_in = realtime_in + playback_in
+        else:
+            track_in = playback_in
+            
+        # 3. Reshape mono input to pedalboard's expected format (channels, samples)
+        pedalboard_in = np.reshape(track_in, (1, -1)).astype(np.float32)
+        
+        # 3. Apply track effects sequentially
+        current_signal = pedalboard_in.copy()
+        try:
+            with track.lock:
+                for wrap in track.effects:
+                    if not wrap.is_active:
+                        continue
+                    effect_out = wrap.effect(current_signal, self.sample_rate, reset=False)
+                    mix = getattr(wrap, "mix", 1.0)
+                    gain_db = getattr(wrap, "gain_db", 0.0)
+                    gain = 10.0 ** (gain_db / 20.0)
+                    
+                    if effect_out.shape[0] != current_signal.shape[0]:
+                        if effect_out.shape[0] == 1 and current_signal.shape[0] == 2:
+                            effect_out = np.repeat(effect_out, 2, axis=0)
+                        elif effect_out.shape[0] == 2 and current_signal.shape[0] == 1:
+                            effect_out = np.mean(effect_out, axis=0, keepdims=True)
+                            
+                    processed = current_signal * (1.0 - mix) + effect_out * mix
+                    current_signal = processed * gain
+            pedalboard_out = current_signal
+        except Exception as e:
+            print(f"Pedalboard processing error on Track {track.name}: {e}")
+            pedalboard_out = np.zeros((pedalboard_in.shape[0], frames), dtype=np.float32)
+            
+        # Write to visualizer buffer
+        if pedalboard_out.shape[1] > 0:
+            track.visualizer_buffer.write(pedalboard_out[0])
+            
+        # 4. Map processed output to stereo
+        out_ch = pedalboard_out.shape[0]
+        out_samples = pedalboard_out.shape[1] if pedalboard_out.ndim > 1 else 0
+        if out_samples != frames:
+            left = np.zeros(frames, dtype=np.float32)
+            right = np.zeros(frames, dtype=np.float32)
+        else:
+            if out_ch == 1:
+                left = pedalboard_out[0, :]
+                right = pedalboard_out[0, :]
+            else:
+                left = pedalboard_out[0, :]
+                right = pedalboard_out[1, :]
+            
+        # 5. Apply Volume & Pan using constant-power panning
+        vol_gain = 10.0 ** (track.volume / 20.0)
+        
+        # Constant power panning
+        g_l = np.cos(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
+        g_r = np.sin(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
+        
+        track_left = left * g_l
+        track_right = right * g_r
+        
+        # 6. Update Track VU Meter level
+        peak_val = max(np.max(np.abs(track_left)), np.max(np.abs(track_right)))
+        track_db = 20.0 * np.log10(peak_val) if peak_val > 1e-5 else -60.0
+        if track_db > track.level_history:
+            track.level_history = track_db
+        else:
+            track.level_history = track.level_history * 0.85 + track_db * 0.15
+            
+        return track_left, track_right
+
     def _process_audio(self, indata, outdata, frames):
         """Core DSP mixing routine."""
         if not self.is_running:
@@ -959,142 +1091,22 @@ class AudioEngine:
             
         has_solo = any(t.solo for t in tracks_copy if not t.mute)
         
+        # Process track DSP loops in parallel using the pre-allocated ThreadPoolExecutor
+        futures = []
         for track in tracks_copy:
-            # Skip tracks that are muted or not part of solo routing
-            if track.mute:
-                track.level_history = -60.0
-                continue
-            if has_solo and not track.solo:
-                track.level_history = -60.0
-                continue
-                
-            # 1. Fetch real-time input block (if armed)
-            realtime_in = None
-            if track.armed:
-                if track.input_channel == "loop":
-                    realtime_in = demo_input
-                elif self.demo_loop_active:
-                    realtime_in = demo_input
-                elif indata is not None:
-                    try:
-                        ch_idx = int(track.input_channel)
-                        if ch_idx < indata.shape[1]:
-                            realtime_in = indata[:, ch_idx]
-                    except (ValueError, TypeError):
-                        pass
-                        
-            if realtime_in is None:
-                realtime_in = np.zeros(frames, dtype=np.float32)
-                
-            # Write realtime_in to tuner circular buffer if track is armed and selected
-            if track.armed and track.track_id == self.selected_track_id:
-                self.tuner_buffer.write(realtime_in)
-                
-            # If recording, append real-time input to recording buffers
-            if is_recording_state and track.armed:
-                with self.lock:
-                    if track.track_id not in self.recording_buffers:
-                        self.recording_buffers[track.track_id] = []
-                    self.recording_buffers[track.track_id].append(realtime_in.copy())
-                    
-            # 2. Fetch playback from recorded items (if play is active)
-            playback_in = np.zeros(frames, dtype=np.float32)
-            if play_active:
-                with track.lock:
-                    items_copy = list(track.items)
-                for item in items_copy:
-                    if item.audio_data is None:
-                        continue
-                    item_len = item.length_samples
-                    item_start = item.start_sample
-                    item_end = item_start + item_len
-                    
-                    # Check overlap of item with current playhead
-                    overlap_start = max(curr_playhead, item_start)
-                    overlap_end = min(curr_playhead + frames, item_end)
-                    
-                    if overlap_start < overlap_end:
-                        read_offset = (overlap_start - item_start) + item.offset_samples
-                        write_offset = overlap_start - curr_playhead
-                        length = overlap_end - overlap_start
-                        playback_in[write_offset : write_offset + length] += item.audio_data[0, read_offset : read_offset + length]
-                        
-            # Mix real-time input and playback items
-            if track.armed:
-                track_in = realtime_in + playback_in
-            else:
-                track_in = playback_in
-                
-            # 3. Reshape mono input to pedalboard's expected format (channels, samples)
-            pedalboard_in = np.reshape(track_in, (1, -1)).astype(np.float32)
+            futures.append(self.thread_pool.submit(
+                self._process_track_dsp,
+                track, indata, demo_input, play_active, is_recording_state, curr_playhead, frames, has_solo
+            ))
             
-            # 3. Apply track effects sequentially
-            current_signal = pedalboard_in.copy()
+        # Accumulate results to main mix
+        for f in futures:
             try:
-                with track.lock:
-                    for wrap in track.effects:
-                        if not wrap.is_active:
-                            continue
-                        effect_out = wrap.effect(current_signal, self.sample_rate, reset=False)
-                        mix = getattr(wrap, "mix", 1.0)
-                        gain_db = getattr(wrap, "gain_db", 0.0)
-                        gain = 10.0 ** (gain_db / 20.0)
-                        
-                        if effect_out.shape[0] != current_signal.shape[0]:
-                            if effect_out.shape[0] == 1 and current_signal.shape[0] == 2:
-                                effect_out = np.repeat(effect_out, 2, axis=0)
-                            elif effect_out.shape[0] == 2 and current_signal.shape[0] == 1:
-                                effect_out = np.mean(effect_out, axis=0, keepdims=True)
-                                
-                        processed = current_signal * (1.0 - mix) + effect_out * mix
-                        current_signal = processed * gain
-                pedalboard_out = current_signal
+                track_left, track_right = f.result()
+                mixed_out[:, 0] += track_left
+                mixed_out[:, 1] += track_right
             except Exception as e:
-                print(f"Pedalboard processing error on Track {track.name}: {e}")
-                pedalboard_out = np.zeros((pedalboard_in.shape[0], frames), dtype=np.float32)
-                
-                
-            # Write to visualizer buffer
-            if pedalboard_out.shape[1] > 0:
-                track.visualizer_buffer.write(pedalboard_out[0])
-                
-            # 4. Map processed output to stereo
-            out_ch = pedalboard_out.shape[0]
-            out_samples = pedalboard_out.shape[1] if pedalboard_out.ndim > 1 else 0
-            if out_samples != frames:
-                left = np.zeros(frames, dtype=np.float32)
-                right = np.zeros(frames, dtype=np.float32)
-            else:
-                if out_ch == 1:
-                    left = pedalboard_out[0, :]
-                    right = pedalboard_out[0, :]
-                else:
-                    left = pedalboard_out[0, :]
-                    right = pedalboard_out[1, :]
-                
-            # 5. Apply Volume & Pan using constant-power panning
-            # Volume: map dB to linear gain
-            vol_gain = 10.0 ** (track.volume / 20.0)
-            
-            # Constant power panning
-            g_l = np.cos(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
-            g_r = np.sin(np.pi / 4.0 * (track.pan + 1.0)) * vol_gain
-            
-            track_left = left * g_l
-            track_right = right * g_r
-            
-            # 6. Sum to main output buffer
-            mixed_out[:, 0] += track_left
-            mixed_out[:, 1] += track_right
-            
-            # 7. Update Track VU Meter level
-            peak_val = max(np.max(np.abs(track_left)), np.max(np.abs(track_right)))
-            track_db = 20.0 * np.log10(peak_val) if peak_val > 1e-5 else -60.0
-            # Track peak smoothing (faster rise, slower fall)
-            if track_db > track.level_history:
-                track.level_history = track_db
-            else:
-                track.level_history = track.level_history * 0.85 + track_db * 0.15
+                print(f"Error processing track in parallel thread pool: {e}")
                 
         # Metronome click trigger and mixing logic
         if self.metronome_enabled and play_active:

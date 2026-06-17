@@ -381,6 +381,10 @@ class MasterStrip(QWidget):
     def _refresh_db(self, db):
         self.lbl_db.setText("-∞ dB" if db <= -60.0 else f"{db:+.1f} dB")
 
+    def update_volume_ui(self):
+        self.fader.setValue(int(self.audio_engine.main_volume * 10))
+        self._refresh_db(self.audio_engine.main_volume)
+
     def tick(self, level):
         self.meter_l.set_level(level[0])
         self.meter_r.set_level(level[1])

@@ -766,6 +766,9 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         if hasattr(self, 'timeline'):
             self.timeline.update_track_layout()
 
+        if hasattr(self, 'mixer_widget'):
+            self.mixer_widget.rebuild()
+
     def calculate_drop_line_y(self, drop_y):
         if not self.track_cards:
             return 30
@@ -1187,7 +1190,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                 self.audio_engine.tracks.clear()
                 self.audio_engine.main_volume = 0.0
                 self.audio_engine.demo_loop_active = False
-            self.slider_master.setValue(0)
+            if hasattr(self, 'mixer_widget') and hasattr(self.mixer_widget, 'master'):
+                self.mixer_widget.master.update_volume_ui()
             self.action_demo.setChecked(False)
             self.update_demo_btn_style()
             self.audio_engine.add_track("Guitar 1")
@@ -1246,8 +1250,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             if success:
                 # Rebuild cards and GUI state
                 self.refresh_track_cards()
-                self.slider_master.setValue(int(self.audio_engine.main_volume * 10))
-                self.update_master_volume_label(self.audio_engine.main_volume)
+                if hasattr(self, 'mixer_widget') and hasattr(self.mixer_widget, 'master'):
+                    self.mixer_widget.master.update_volume_ui()
                 self.action_demo.setChecked(self.audio_engine.demo_loop_active)
                 self.update_demo_btn_style()
                 self.update_stream_btn_style()

@@ -10,13 +10,13 @@
     "request_sample_rate": true,
     "sample_rate": 48000,
     "request_block_size": true,
-    "block_size": 256,
+    "block_size": 512,
     "pre_zero_buffers": true,
     "ignore_asio_reset": true,
     "allow_project_override_sr": true,
-    "thread_priority": "ASIO Default / MMCSS Pro Audio / Time Critical",
+    "thread_priority": "Normal",
     "vst_search_paths": [
         "C:\\Program Files\\Common Files\\VST3"
     ],
-    "startup_project_path": "C:/Repos/guitar/fundamentals.graphite"
+    "startup_project_path": "C:/Repos/fundamentals.graphite"
 }
