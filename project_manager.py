@@ -27,6 +27,8 @@ def serialize_effect(wrapper):
         "effect_type": wrapper.effect_type,
         "name": wrapper.name,
         "is_active": wrapper.is_active,
+        "mix": getattr(wrapper, "mix", 1.0),
+        "gain_db": getattr(wrapper, "gain_db", 0.0),
         "parameters": {}
     }
     
@@ -70,6 +72,8 @@ def deserialize_effect(data):
                 effect_obj.raw_state = base64.b64decode(raw_state_b64)
             wrapper = EffectWrapper(effect_obj, name, "VST3", is_active)
             wrapper.original_vst_path = vst_path
+            wrapper.mix = data.get("mix", 1.0)
+            wrapper.gain_db = data.get("gain_db", 0.0)
             return wrapper
         except Exception as e:
             print(f"Failed to load VST3 plugin at {vst_path}: {e}")
@@ -83,7 +87,10 @@ def deserialize_effect(data):
                 init_args[p] = data["parameters"][p]
         try:
             effect_obj = klass(**init_args)
-            return EffectWrapper(effect_obj, name, effect_type, is_active)
+            wrapper = EffectWrapper(effect_obj, name, effect_type, is_active)
+            wrapper.mix = data.get("mix", 1.0)
+            wrapper.gain_db = data.get("gain_db", 0.0)
+            return wrapper
         except Exception as e:
             print(f"Failed to instantiate effect {effect_type}: {e}")
             return None

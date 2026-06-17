@@ -291,6 +291,8 @@ class EffectWrapper:
         self.effect_type = effect_type
         self.is_active = is_active
         self.original_vst_path = None
+        self.mix = 1.0
+        self.gain_db = 0.0
 
 
 class Track:
@@ -310,6 +312,7 @@ class Track:
         # The compiled Pedalboard object
         self.pedalboard = Pedalboard([])
         self.level_history = -60.0  # Recent peak level in dB
+        self.visualizer_buffer = TunerBuffer(2048)
         self.lock = threading.Lock()
         
     def update_pedalboard(self, sample_rate=44100):
@@ -842,14 +845,31 @@ class AudioEngine:
                                     resampled_chunk = np.interp(target_indices, orig_indices, orig_chunk)
                                     track_playback[write_offset : write_offset + length] += resampled_chunk
                                     
-                        # Process through track pedalboard
+                        # Process through track effects sequentially
                         pedalboard_in = np.reshape(track_playback, (1, -1)).astype(np.float32)
+                        current_signal = pedalboard_in.copy()
                         try:
-                            # Run pedalboard (at target sample rate)
-                            pedalboard_out = track.pedalboard(pedalboard_in, sample_rate, reset=False)
+                            with track.lock:
+                                for wrap in track.effects:
+                                    if not wrap.is_active:
+                                        continue
+                                    effect_out = wrap.effect(current_signal, sample_rate, reset=False)
+                                    mix = getattr(wrap, "mix", 1.0)
+                                    gain_db = getattr(wrap, "gain_db", 0.0)
+                                    gain = 10.0 ** (gain_db / 20.0)
+                                    
+                                    if effect_out.shape[0] != current_signal.shape[0]:
+                                        if effect_out.shape[0] == 1 and current_signal.shape[0] == 2:
+                                            effect_out = np.repeat(effect_out, 2, axis=0)
+                                        elif effect_out.shape[0] == 2 and current_signal.shape[0] == 1:
+                                            effect_out = np.mean(effect_out, axis=0, keepdims=True)
+                                            
+                                    processed = current_signal * (1.0 - mix) + effect_out * mix
+                                    current_signal = processed * gain
+                            pedalboard_out = current_signal
                         except Exception as e:
                             print(f"Pedalboard offline render error: {e}")
-                            pedalboard_out = np.zeros((1, frames), dtype=np.float32)
+                            pedalboard_out = np.zeros((pedalboard_in.shape[0], frames), dtype=np.float32)
                             
                         # Reshape to stereo
                         out_ch = pedalboard_out.shape[0]
@@ -1005,14 +1025,35 @@ class AudioEngine:
             # 3. Reshape mono input to pedalboard's expected format (channels, samples)
             pedalboard_in = np.reshape(track_in, (1, -1)).astype(np.float32)
             
-            # 3. Apply track effects
+            # 3. Apply track effects sequentially
+            current_signal = pedalboard_in.copy()
             try:
                 with track.lock:
-                    pedalboard_out = track.pedalboard(pedalboard_in, self.sample_rate, reset=False)
+                    for wrap in track.effects:
+                        if not wrap.is_active:
+                            continue
+                        effect_out = wrap.effect(current_signal, self.sample_rate, reset=False)
+                        mix = getattr(wrap, "mix", 1.0)
+                        gain_db = getattr(wrap, "gain_db", 0.0)
+                        gain = 10.0 ** (gain_db / 20.0)
+                        
+                        if effect_out.shape[0] != current_signal.shape[0]:
+                            if effect_out.shape[0] == 1 and current_signal.shape[0] == 2:
+                                effect_out = np.repeat(effect_out, 2, axis=0)
+                            elif effect_out.shape[0] == 2 and current_signal.shape[0] == 1:
+                                effect_out = np.mean(effect_out, axis=0, keepdims=True)
+                                
+                        processed = current_signal * (1.0 - mix) + effect_out * mix
+                        current_signal = processed * gain
+                pedalboard_out = current_signal
             except Exception as e:
-                # Catch pedalboard execution exceptions (e.g. VST crash) and output silence
                 print(f"Pedalboard processing error on Track {track.name}: {e}")
-                pedalboard_out = np.zeros((1, frames), dtype=np.float32)
+                pedalboard_out = np.zeros((pedalboard_in.shape[0], frames), dtype=np.float32)
+                
+                
+            # Write to visualizer buffer
+            if pedalboard_out.shape[1] > 0:
+                track.visualizer_buffer.write(pedalboard_out[0])
                 
             # 4. Map processed output to stereo
             out_ch = pedalboard_out.shape[0]

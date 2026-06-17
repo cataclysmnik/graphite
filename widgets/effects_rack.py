@@ -1,11 +1,13 @@
 import os
+import math
+import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QComboBox, QScrollArea, QFileDialog, QSizePolicy, QMessageBox,
     QMenu
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QFont, QColor, QPainterPath, QLinearGradient, QBrush, QPainter, QPen
 from pedalboard import (
     NoiseGate, Distortion, Chorus, Phaser, Delay, Reverb,
     PitchShift, Compressor, LowpassFilter, HighpassFilter, load_plugin
@@ -130,6 +132,8 @@ EFFECT_TYPES = {
     "Highpass Filter": "HighpassFilter",
 }
 
+
+
 class EffectCard(QFrame):
     """Visual card representing a single effect in the track rack."""
     effectChanged = Signal()  # Emitted when parameter, bypass, or delete changes
@@ -154,6 +158,8 @@ class EffectCard(QFrame):
             if self.wrapper.effect_type in EFFECT_CLASSES:
                 _, params = EFFECT_CLASSES[self.wrapper.effect_type]
                 num_knobs = sum(1 for p in params if p in PARAM_METADATA)
+        else:
+            num_knobs = 2
         
         card_width = max(250, 30 + num_knobs * 80)
         self.setMinimumWidth(card_width)
@@ -232,8 +238,34 @@ class EffectCard(QFrame):
                             lambda val, name=p_name: self.on_parameter_changed(name, val)
                         )
                         body.addWidget(knob)
+                body.addStretch()
+        else:
+            body.addStretch()
+            self.knob_mix = CustomKnob(
+                label="MIX",
+                min_val=0.0,
+                max_val=100.0,
+                default_val=100.0,
+                unit="%",
+                decimals=0
+            )
+            self.knob_mix.setValue(getattr(self.wrapper, "mix", 1.0) * 100.0)
+            self.knob_mix.valueChanged.connect(self.on_vst_mix_changed)
+            body.addWidget(self.knob_mix)
+            
+            self.knob_gain = CustomKnob(
+                label="GAIN",
+                min_val=-24.0,
+                max_val=12.0,
+                default_val=0.0,
+                unit="dB",
+                decimals=1
+            )
+            self.knob_gain.setValue(getattr(self.wrapper, "gain_db", 0.0))
+            self.knob_gain.valueChanged.connect(self.on_vst_gain_changed)
+            body.addWidget(self.knob_gain)
+            body.addStretch()
                         
-        body.addStretch()
         layout.addLayout(body)
         layout.addStretch()
         
@@ -320,6 +352,14 @@ class EffectCard(QFrame):
     def on_parameter_changed(self, param_name, value):
         if hasattr(self.wrapper.effect, param_name):
             setattr(self.wrapper.effect, param_name, value)
+
+    def on_vst_mix_changed(self, value):
+        self.wrapper.mix = value / 100.0
+        self.effectChanged.emit()
+
+    def on_vst_gain_changed(self, value):
+        self.wrapper.gain_db = value
+        self.effectChanged.emit()
 
     def set_selected(self, selected):
         if self.is_selected == selected:
@@ -757,6 +797,8 @@ class EffectsRack(QWidget):
                     if new_dragged_card.wrapper.effect_type in EFFECT_CLASSES:
                         _, params = EFFECT_CLASSES[new_dragged_card.wrapper.effect_type]
                         num_knobs = sum(1 for p in params if p in PARAM_METADATA)
+                else:
+                    num_knobs = 2
                 cw = max(250, 30 + num_knobs * 80)
                 new_dragged_card.setMinimumWidth(cw)
                 new_dragged_card.setMaximumWidth(cw + 30)
