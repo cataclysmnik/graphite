@@ -133,17 +133,21 @@ EFFECT_TYPES = {
 class EffectCard(QFrame):
     """Visual card representing a single effect in the track rack."""
     effectChanged = Signal()  # Emitted when parameter, bypass, or delete changes
+    effectDuplicated = Signal(object) # Emitted when duplicate action is triggered
     
     def __init__(self, wrapper, track, parent=None):
         super().__init__(parent)
         self.wrapper = wrapper
         self.track = track
         self.is_selected = False
+        self.drag_start_position = None
         self.setProperty("selected", False)
         
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("EffectCard")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.setMinimumWidth(250)
+        self.setMaximumWidth(280)
         
         self.setup_ui()
         
@@ -172,6 +176,13 @@ class EffectCard(QFrame):
         
         header.addStretch()
         
+        if self.wrapper.effect_type == "VST3":
+            self.btn_settings = QPushButton("⚙")
+            self.btn_settings.setObjectName("SettingsButton")
+            self.btn_settings.setToolTip("Open VST Settings")
+            self.btn_settings.clicked.connect(self.open_vst_editor)
+            header.addWidget(self.btn_settings)
+        
         # Delete Button (X)
         self.btn_delete = QPushButton("✕")
         self.btn_delete.setObjectName("DeleteButton")
@@ -186,24 +197,7 @@ class EffectCard(QFrame):
         body.setSpacing(15)
         
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        if self.wrapper.effect_type == "VST3":
-            # For VST3, show a path label
-            vst_layout = QVBoxLayout()
-            vst_layout.setSpacing(4)
-            
-            vst_path = getattr(self.wrapper, "original_vst_path", None)
-            if not vst_path:
-                vst_path = getattr(self.wrapper.effect, "path", "")
-            filename = os.path.basename(vst_path)
-            
-            self.lbl_vst_path = QLabel(f"Path: {filename}")
-            self.lbl_vst_path.setObjectName("VstPathLabel")
-            self.lbl_vst_path.setToolTip(vst_path)
-            self.lbl_vst_path.setWordWrap(True)
-            vst_layout.addWidget(self.lbl_vst_path)
-            
-            body.addLayout(vst_layout)
-        else:
+        if self.wrapper.effect_type != "VST3":
             # Render custom knobs for built-in effects
             from project_manager import EFFECT_CLASSES
             if self.wrapper.effect_type in EFFECT_CLASSES:
@@ -262,6 +256,21 @@ class EffectCard(QFrame):
                 font-weight: bold;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
+            }
+            QPushButton#SettingsButton {
+                color: #88888c;
+                font-family: "Consolas", "Courier New", monospace;
+                font-weight: bold;
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                min-width: 20px;
+                min-height: 20px;
+            }
+            QPushButton#SettingsButton:hover {
+                color: #ffffff;
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
             }
             QPushButton#DeleteButton {
                 color: #88888c;
@@ -324,8 +333,82 @@ class EffectCard(QFrame):
             if effects_rack:
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(0, lambda: effects_rack.select_card(self))
-                return
+                
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.drag_start_position = event.pos()
+                
         super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.wrapper.effect_type == "VST3":
+                self.open_vst_editor()
+                event.accept()
+                return
+        super().mouseDoubleClickEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if not hasattr(self, 'drag_start_position') or self.drag_start_position is None:
+            return
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if (event.pos() - self.drag_start_position).manhattanLength() < 10:
+            return
+            
+        from PySide6.QtGui import QDrag
+        from PySide6.QtCore import QMimeData
+        
+        drag = QDrag(self)
+        mime_data = QMimeData()
+        try:
+            effect_idx = self.track.effects.index(self.wrapper)
+            mime_data.setText(f"effect:{effect_idx}")
+        except ValueError:
+            return
+        drag.setMimeData(mime_data)
+        
+        pixmap = self.grab()
+        scaled_pixmap = pixmap.scaledToWidth(200, Qt.TransformationMode.SmoothTransformation)
+        drag.setPixmap(scaled_pixmap)
+        drag.setHotSpot(event.pos() * (200 / pixmap.width()))
+        
+        drag.exec(Qt.DropAction.MoveAction)
+        self.drag_start_position = None
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtGui import QAction
+        
+        effects_rack = self.find_effects_rack()
+        if effects_rack:
+            effects_rack.select_card(self)
+            
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0b0b0c;
+                color: #e2e2e5;
+                border: 1px solid #222225;
+            }
+            QMenu::item:selected {
+                background-color: #222225;
+                color: #ffffff;
+            }
+        """)
+        
+        action_duplicate = QAction("Duplicate Effect", self)
+        action_duplicate.triggered.connect(self.trigger_duplicate)
+        menu.addAction(action_duplicate)
+        
+        menu.addSeparator()
+        
+        action_delete = QAction("Delete Effect", self)
+        action_delete.triggered.connect(self.on_delete_clicked)
+        menu.addAction(action_delete)
+        
+        menu.exec(event.globalPos())
+
+    def trigger_duplicate(self):
+        self.effectDuplicated.emit(self.wrapper)
 
     def find_effects_rack(self):
         p = self.parent()
@@ -340,7 +423,66 @@ class EffectCard(QFrame):
         self.track.update_pedalboard()
         self.effectChanged.emit()
 
+class EffectsContainer(QWidget):
+    def __init__(self, effects_rack, parent=None):
+        super().__init__(parent)
+        self.effects_rack = effects_rack
+        self.setAcceptDrops(True)
+        self.drop_indicator_x = None
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText() and event.mimeData().text().startswith("effect:"):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasText() and event.mimeData().text().startswith("effect:"):
+            drop_pos = event.position().toPoint()
+            self.drop_indicator_x = self.effects_rack.calculate_drop_line_x(drop_pos.x())
+            self.update()
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragLeaveEvent(self, event):
+        self.drop_indicator_x = None
+        self.update()
+        event.accept()
+
+    def dropEvent(self, event):
+        mime_text = event.mimeData().text()
+        if mime_text.startswith("effect:"):
+            try:
+                effect_idx = int(mime_text.split(":")[1])
+            except ValueError:
+                event.ignore()
+                return
+            
+            drop_pos = event.position().toPoint()
+            self.drop_indicator_x = None
+            self.update()
+            self.effects_rack.reorder_effects(effect_idx, drop_pos.x())
+            event.acceptProposedAction()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.drop_indicator_x is not None:
+            from PySide6.QtGui import QPainter, QPen, QColor
+            painter = QPainter(self)
+            try:
+                painter.setPen(QPen(QColor("#ffffff"), 2.0, Qt.PenStyle.SolidLine))
+                painter.drawLine(self.drop_indicator_x, 0, self.drop_indicator_x, self.height())
+            finally:
+                painter.end()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.effects_rack.show_vst_menu_at(event.globalPosition().toPoint())
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        self.effects_rack.show_empty_space_context_menu(event.globalPos())
 class EffectsRack(QWidget):
     """Rack panel containing list of active effects and add menus."""
     def __init__(self, audio_engine, parent=None):
@@ -378,12 +520,8 @@ class EffectsRack(QWidget):
         self.combo_fx.addItem("Add Built-in Effect...", None)
         for name in EFFECT_TYPES.keys():
             self.combo_fx.addItem(name, EFFECT_TYPES[name])
+        self.combo_fx.activated.connect(self.on_combo_fx_activated)
         top_bar.addWidget(self.combo_fx)
-        
-        self.btn_add = QPushButton("Add FX")
-        self.btn_add.setObjectName("AddFxButton")
-        self.btn_add.clicked.connect(self.on_add_effect)
-        top_bar.addWidget(self.btn_add)
         
         self.btn_add_vst = QPushButton("Load VST3...")
         self.btn_add_vst.setObjectName("AddVstButton")
@@ -399,15 +537,15 @@ class EffectsRack(QWidget):
         self.scroll_area.setObjectName("RackScrollArea")
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
-        self.scroll_widget = QWidget()
+        self.scroll_widget = EffectsContainer(self)
         self.scroll_widget.setObjectName("RackScrollWidget")
-        self.scroll_layout = QVBoxLayout(self.scroll_widget)
+        self.scroll_layout = QHBoxLayout(self.scroll_widget)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setSpacing(10)
-        self.scroll_layout.addStretch()  # Pin elements to the top
+        self.scroll_layout.addStretch()  # Pin elements to the left
         
         self.scroll_area.setWidget(self.scroll_widget)
         layout.addWidget(self.scroll_area)
@@ -485,16 +623,129 @@ class EffectsRack(QWidget):
                 w = item.widget()
                 if isinstance(w, EffectCard):
                     w.set_selected(w == card)
-        
-        # Trigger opening the VST settings/popup
-        main_window = self.window()
-        if card:
-            if card.wrapper.effect_type == "VST3":
-                if hasattr(main_window, 'open_vst_in_tab'):
-                    main_window.open_vst_in_tab(card, card.wrapper)
-        else:
-            if hasattr(main_window, 'show_no_vst_placeholder'):
-                main_window.show_no_vst_placeholder()
+
+    def on_effect_duplicated(self, wrapper):
+        if not self.selected_track:
+            return
+        import project_manager
+        try:
+            serialized = project_manager.serialize_effect(wrapper)
+            new_wrapper = project_manager.deserialize_effect(serialized)
+            if new_wrapper:
+                idx = self.selected_track.effects.index(wrapper)
+                self.selected_track.effects.insert(idx + 1, new_wrapper)
+                try:
+                    self.selected_track.update_pedalboard(self.audio_engine.sample_rate)
+                except Exception as e:
+                    self.selected_track.effects.remove(new_wrapper)
+                    raise e
+                self.refresh_rack()
+                if self.signal_flow_widget:
+                    self.signal_flow_widget.refresh_flow()
+        except Exception as e:
+            print(f"Error duplicating effect: {e}")
+
+    def calculate_drop_line_x(self, drop_x):
+        cards = []
+        for i in range(self.scroll_layout.count()):
+            item = self.scroll_layout.itemAt(i)
+            if item and isinstance(item.widget(), EffectCard):
+                cards.append(item.widget())
+        if not cards:
+            return 0
+        for card in cards:
+            card_geom = card.geometry()
+            card_x_center = card_geom.x() + card_geom.width() / 2
+            if drop_x < card_x_center:
+                return card_geom.x() - 5
+        last_card_geom = cards[-1].geometry()
+        return last_card_geom.x() + last_card_geom.width() + 5
+
+    def reorder_effects(self, dragged_effect_index, drop_x):
+        if not self.selected_track:
+            return
+        effects = self.selected_track.effects
+        if dragged_effect_index >= len(effects):
+            return
+        dragged_wrapper = effects[dragged_effect_index]
+        cards = []
+        for i in range(self.scroll_layout.count()):
+            item = self.scroll_layout.itemAt(i)
+            if item and isinstance(item.widget(), EffectCard):
+                cards.append(item.widget())
+        new_index = 0
+        inserted = False
+        for i, card in enumerate(cards):
+            if card.wrapper == dragged_wrapper:
+                continue
+            card_x_center = card.geometry().x() + card.geometry().width() / 2
+            if drop_x < card_x_center:
+                new_index = i
+                inserted = True
+                break
+        if not inserted:
+            new_index = len(cards) - 1
+            if new_index < 0:
+                new_index = 0
+        old_index = dragged_effect_index
+        if old_index == new_index:
+            return
+        dragged_card = None
+        for card in cards:
+            if card.wrapper == dragged_wrapper:
+                dragged_card = card
+                break
+        if not dragged_card:
+            return
+        card_width = dragged_card.width()
+        from PySide6.QtCore import QVariantAnimation
+        self.reorder_anim = QVariantAnimation(self)
+        self.reorder_anim.setDuration(120)
+        self.reorder_anim.setStartValue(card_width)
+        self.reorder_anim.setEndValue(0)
+        def on_collapse_val(val):
+            dragged_card.setFixedWidth(val)
+        self.reorder_anim.valueChanged.connect(on_collapse_val)
+        def on_collapse_finished():
+            self.reorder_anim.valueChanged.disconnect()
+            try:
+                self.reorder_anim.finished.disconnect()
+            except RuntimeError:
+                pass
+            self.selected_track.effects.remove(dragged_wrapper)
+            self.selected_track.effects.insert(new_index, dragged_wrapper)
+            self.selected_track.update_pedalboard(self.audio_engine.sample_rate)
+            self.refresh_rack()
+            new_cards = []
+            for i in range(self.scroll_layout.count()):
+                item = self.scroll_layout.itemAt(i)
+                if item and isinstance(item.widget(), EffectCard):
+                    new_cards.append(item.widget())
+            new_dragged_card = None
+            for card in new_cards:
+                if card.wrapper == dragged_wrapper:
+                    new_dragged_card = card
+                    break
+            if not new_dragged_card:
+                return
+            self.reorder_anim_expand = QVariantAnimation(self)
+            self.reorder_anim_expand.setDuration(120)
+            self.reorder_anim_expand.setStartValue(0)
+            self.reorder_anim_expand.setEndValue(card_width)
+            def on_expand_val(val):
+                new_dragged_card.setFixedWidth(val)
+            self.reorder_anim_expand.valueChanged.connect(on_expand_val)
+            def on_expand_finished():
+                new_dragged_card.setMinimumWidth(250)
+                new_dragged_card.setMaximumWidth(280)
+                new_dragged_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+                new_dragged_card.updateGeometry()
+            self.reorder_anim_expand.finished.connect(on_expand_finished)
+            self.reorder_anim_expand.start()
+            if self.signal_flow_widget:
+                self.signal_flow_widget.refresh_flow()
+        self.reorder_anim.finished.connect(on_collapse_finished)
+        self.reorder_anim.start()
 
     def refresh_rack(self):
         """Clears and rebuilds the effects list."""
@@ -510,13 +761,11 @@ class EffectsRack(QWidget):
         if not self.selected_track:
             self.lbl_title.setText("Effects Rack (No Track Selected)")
             self.combo_fx.setEnabled(False)
-            self.btn_add.setEnabled(False)
             self.btn_add_vst.setEnabled(False)
             return
             
         self.lbl_title.setText(f"Effects Rack: {self.selected_track.name}")
         self.combo_fx.setEnabled(True)
-        self.btn_add.setEnabled(True)
         self.btn_add_vst.setEnabled(True)
         
         # Verify selected effect wrapper is still in effects list
@@ -531,6 +780,7 @@ class EffectsRack(QWidget):
         for wrapper in self.selected_track.effects:
             card = EffectCard(wrapper, self.selected_track)
             card.effectChanged.connect(self.refresh_rack)
+            card.effectDuplicated.connect(self.on_effect_duplicated)
             self.scroll_layout.insertWidget(self.scroll_layout.count() - 1, card)
             
             if wrapper == self.selected_effect_wrapper:
@@ -539,20 +789,24 @@ class EffectsRack(QWidget):
             else:
                 card.set_selected(False)
                 
-    def on_add_effect(self):
+    def on_combo_fx_activated(self, index):
         if not self.selected_track:
             return
-            
-        fx_type = self.combo_fx.currentData()
+        fx_type = self.combo_fx.itemData(index)
         if not fx_type:
             return
-            
+        display_name = self.combo_fx.itemText(index)
+        self.add_builtin_effect_by_type(fx_type, display_name)
+        self.combo_fx.setCurrentIndex(0)
+
+    def add_builtin_effect_by_type(self, fx_type, display_name):
+        if not self.selected_track:
+            return
         effect_obj = None
         try:
             if fx_type == "NoiseGate":
                 effect_obj = NoiseGate(threshold_db=-45, ratio=10, attack_ms=1.5, release_ms=80.0)
             elif fx_type == "Distortion":
-                # Upgraded to physical model TubeOverdrive composite pedal
                 effect_obj = TubeOverdrive(drive_db=15.0, tone=0.5, level_db=0.0)
             elif fx_type == "Chorus":
                 effect_obj = Chorus(rate_hz=1.2, depth=0.3, feedback=0.1, mix=0.4)
@@ -579,11 +833,83 @@ class EffectsRack(QWidget):
             return
             
         if effect_obj:
-            wrapper = EffectWrapper(effect_obj, self.combo_fx.currentText(), fx_type, is_active=True)
+            wrapper = EffectWrapper(effect_obj, display_name, fx_type, is_active=True)
             self.selected_track.effects.append(wrapper)
-            self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
+            try:
+                self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
+            except Exception as e:
+                self.selected_track.effects.remove(wrapper)
+                raise e
+            self.refresh_rack()
+
+    def show_vst_menu_at(self, global_pos):
+        self.populate_vst_menu()
+        self.vst_menu.exec(global_pos)
+
+    def show_empty_space_context_menu(self, global_pos):
+        if not self.selected_track:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #0b0b0c;
+                color: #e2e2e5;
+                border: 1px solid #222225;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 11px;
+            }
+            QMenu::item:selected {
+                background-color: #222225;
+                color: #ffffff;
+            }
+        """)
+        
+        vst_sub = menu.addMenu("Add VST")
+        vst_sub.setStyleSheet(menu.styleSheet())
+        
+        search_paths = getattr(self.audio_engine, "vst_search_paths", ["C:\\Program Files\\Common Files\\VST3"])
+        scanned_vsts = scan_for_vst3s(search_paths)
+        if scanned_vsts:
+            for name, path in scanned_vsts:
+                action = vst_sub.addAction(name)
+                action.triggered.connect(lambda checked=False, p=path: self.load_scanned_vst3(p))
+            vst_sub.addSeparator()
+        action_browse = vst_sub.addAction("Browse for VST3 file...")
+        action_browse.triggered.connect(self.on_load_vst3)
+        
+        fx_sub = menu.addMenu("Add Effect")
+        fx_sub.setStyleSheet(menu.styleSheet())
+        for name, fx_type in EFFECT_TYPES.items():
+            action = fx_sub.addAction(name)
+            action.triggered.connect(lambda checked=False, t=fx_type, n=name: self.add_builtin_effect_by_type(t, n))
             
-            self.combo_fx.setCurrentIndex(0)
+        menu.addSeparator()
+        
+        action_clear = menu.addAction("Clear All")
+        action_clear.triggered.connect(self.clear_all_effects)
+        
+        menu.exec(global_pos)
+
+    def clear_all_effects(self):
+        if not self.selected_track:
+            return
+        main_window = self.window()
+        if hasattr(main_window, 'show_themed_message_box'):
+            reply = main_window.show_themed_message_box(
+                "Clear All Effects",
+                "Are you sure you want to clear all effects from this track?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+        else:
+            reply = QMessageBox.question(
+                self, "Clear All Effects",
+                "Are you sure you want to clear all effects from this track?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.selected_track.effects.clear()
+            self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
             self.refresh_rack()
             
     def on_load_vst3(self):
@@ -654,10 +980,14 @@ class EffectsRack(QWidget):
             vst_obj = load_vst_plugin(file_path)
             filename = os.path.splitext(os.path.basename(file_path))[0]
             
-            wrapper = EffectWrapper(vst_obj, f"VST: {filename}", "VST3", is_active=True)
+            wrapper = EffectWrapper(vst_obj, filename, "VST3", is_active=True)
             wrapper.original_vst_path = file_path
             self.selected_track.effects.append(wrapper)
-            self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
+            try:
+                self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)
+            except Exception as e:
+                self.selected_track.effects.remove(wrapper)
+                raise e
             
             self.refresh_rack()
         except Exception as e:

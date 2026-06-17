@@ -399,11 +399,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         # Effects Tab — first in bottom dock
         self.vst_settings_tab = QWidget()
-        vst_settings_layout = QVBoxLayout(self.vst_settings_tab)
+        vst_settings_layout = QHBoxLayout(self.vst_settings_tab)
         vst_settings_layout.setContentsMargins(5, 5, 5, 5)
         vst_settings_layout.setSpacing(5)
-        vst_settings_layout.addWidget(self.signal_flow_widget)
         vst_settings_layout.addWidget(self.effects_rack)
+        vst_settings_layout.addWidget(self.signal_flow_widget)
         self.bottom_dock.addTab(self.vst_settings_tab, "Effects")
         
         # Utilities Tab (Tuner and Metronome side-by-side)

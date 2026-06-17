@@ -1016,12 +1016,17 @@ class AudioEngine:
                 
             # 4. Map processed output to stereo
             out_ch = pedalboard_out.shape[0]
-            if out_ch == 1:
-                left = pedalboard_out[0, :]
-                right = pedalboard_out[0, :]
+            out_samples = pedalboard_out.shape[1] if pedalboard_out.ndim > 1 else 0
+            if out_samples != frames:
+                left = np.zeros(frames, dtype=np.float32)
+                right = np.zeros(frames, dtype=np.float32)
             else:
-                left = pedalboard_out[0, :]
-                right = pedalboard_out[1, :]
+                if out_ch == 1:
+                    left = pedalboard_out[0, :]
+                    right = pedalboard_out[0, :]
+                else:
+                    left = pedalboard_out[0, :]
+                    right = pedalboard_out[1, :]
                 
             # 5. Apply Volume & Pan using constant-power panning
             # Volume: map dB to linear gain
