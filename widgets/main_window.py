@@ -186,6 +186,20 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.setup_ui()
         self.init_frameless(self.title_bar)
         
+        # Load startup project if set
+        startup_path = getattr(self.audio_engine, "startup_project_path", "")
+        if startup_path and os.path.exists(startup_path):
+            try:
+                import project_manager
+                success = project_manager.load_project(startup_path, self.audio_engine)
+                if success:
+                    print(f"Loaded startup project: {startup_path}")
+                    self.refresh_track_cards()
+                    if hasattr(self, 'mixer_widget'):
+                        self.mixer_widget.rebuild()
+            except Exception as e:
+                print(f"Failed to load startup project: {e}")
+        
         # Select first track by default
         if self.track_cards:
             self.track_cards[0].set_selected(True)

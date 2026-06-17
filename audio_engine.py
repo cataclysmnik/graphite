@@ -384,6 +384,7 @@ class AudioEngine:
         self.guitar_loop = precompute_guitar_loop(self.sample_rate)
         self.guitar_loop_idx = 0
         self.vst_search_paths = ["C:\\Program Files\\Common Files\\VST3"]
+        self.startup_project_path = ""
         self.lock = threading.RLock()
         self.tuner_buffer = TunerBuffer(8192)
         self.selected_track_id = 1
@@ -424,7 +425,8 @@ class AudioEngine:
                 "ignore_asio_reset": self.ignore_asio_reset,
                 "allow_project_override_sr": self.allow_project_override_sr,
                 "thread_priority": self.thread_priority,
-                "vst_search_paths": self.vst_search_paths
+                "vst_search_paths": self.vst_search_paths,
+                "startup_project_path": self.startup_project_path
             }
             with open(settings_path, "w") as f:
                 json.dump(settings_data, f, indent=4)
@@ -457,6 +459,7 @@ class AudioEngine:
             self.allow_project_override_sr = data.get("allow_project_override_sr", self.allow_project_override_sr)
             self.thread_priority = data.get("thread_priority", self.thread_priority)
             self.vst_search_paths = data.get("vst_search_paths", ["C:\\Program Files\\Common Files\\VST3"])
+            self.startup_project_path = data.get("startup_project_path", "")
         except Exception as e:
             print(f"Failed to load audio settings: {e}")
             

@@ -252,6 +252,41 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
         vst_layout.addLayout(vst_btn_layout)
         content_layout.addWidget(vst_group)
 
+        # --- STARTUP PROJECT GROUP BOX ---
+        startup_group = QGroupBox("Startup project")
+        startup_group.setObjectName("StartupGroupBox")
+        startup_layout = QHBoxLayout(startup_group)
+        startup_layout.setContentsMargins(15, 15, 15, 15)
+        startup_layout.setSpacing(10)
+        
+        self.edit_startup_path = QLineEdit()
+        self.edit_startup_path.setObjectName("StartupPathEdit")
+        self.edit_startup_path.setReadOnly(True)
+        self.edit_startup_path.setPlaceholderText("No startup project file set (will load default project)")
+        self.edit_startup_path.setStyleSheet("""
+            QLineEdit#StartupPathEdit {
+                background-color: #000000;
+                border: 1px solid #333333;
+                color: #ffffff;
+                padding: 4px 8px;
+                font-family: "Consolas", monospace;
+                font-size: 11px;
+            }
+        """)
+        startup_layout.addWidget(self.edit_startup_path, 1)
+        
+        self.btn_browse_startup = QPushButton("Browse...")
+        self.btn_browse_startup.setObjectName("VstPathButton")
+        self.btn_browse_startup.clicked.connect(self.on_browse_startup_project)
+        startup_layout.addWidget(self.btn_browse_startup)
+        
+        self.btn_clear_startup = QPushButton("Clear")
+        self.btn_clear_startup.setObjectName("VstPathButton")
+        self.btn_clear_startup.clicked.connect(self.on_clear_startup_project)
+        startup_layout.addWidget(self.btn_clear_startup)
+        
+        content_layout.addWidget(startup_group)
+
         # OK / CANCEL BUTTONS
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -278,7 +313,7 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
                 font-family: "Consolas", monospace;
                 font-weight: bold;
             }
-            QGroupBox#VstGroupBox {
+            QGroupBox#VstGroupBox, QGroupBox#StartupGroupBox {
                 border: 1px solid #333333;
                 border-radius: 0px;
                 margin-top: 10px;
@@ -428,6 +463,9 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
         self.list_vst_paths.clear()
         for p in self.audio_engine.vst_search_paths:
             self.list_vst_paths.addItem(p)
+            
+        # Load startup project path
+        self.edit_startup_path.setText(getattr(self.audio_engine, "startup_project_path", ""))
             
     def on_system_changed(self):
         """Switches visual layout based on host API (ASIO vs. standard)."""
@@ -691,6 +729,9 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
             vst_paths.append(self.list_vst_paths.item(i).text())
         self.audio_engine.vst_search_paths = vst_paths
         
+        # Save startup project path
+        self.audio_engine.startup_project_path = self.edit_startup_path.text()
+        
         # Apply changes and restart stream
         was_running = self.audio_engine.is_running
         success = self.audio_engine.start_stream()
@@ -717,3 +758,13 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
         curr_row = self.list_vst_paths.currentRow()
         if curr_row >= 0:
             self.list_vst_paths.takeItem(curr_row)
+
+    def on_browse_startup_project(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Startup Project File", "", "Graphite Project Files (*.graphite *.gtrp);;Graphite Project (*.graphite);;All Files (*)"
+        )
+        if file_path:
+            self.edit_startup_path.setText(file_path)
+
+    def on_clear_startup_project(self):
+        self.edit_startup_path.clear()

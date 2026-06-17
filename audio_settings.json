@@ -17,5 +17,6 @@
     "thread_priority": "ASIO Default / MMCSS Pro Audio / Time Critical",
     "vst_search_paths": [
         "C:\\Program Files\\Common Files\\VST3"
-    ]
+    ],
+    "startup_project_path": "C:/Repos/guitar/fundamentals.graphite"
 }
