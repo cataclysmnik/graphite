@@ -146,13 +146,24 @@ class EffectCard(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("EffectCard")
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        self.setMinimumWidth(250)
-        self.setMaximumWidth(280)
+        
+        # Calculate responsive width based on parameter/knob count
+        num_knobs = 0
+        if self.wrapper.effect_type != "VST3":
+            from project_manager import EFFECT_CLASSES
+            if self.wrapper.effect_type in EFFECT_CLASSES:
+                _, params = EFFECT_CLASSES[self.wrapper.effect_type]
+                num_knobs = sum(1 for p in params if p in PARAM_METADATA)
+        
+        card_width = max(250, 30 + num_knobs * 80)
+        self.setMinimumWidth(card_width)
+        self.setMaximumWidth(card_width + 30)
         
         self.setup_ui()
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(8)
         
@@ -194,6 +205,7 @@ class EffectCard(QFrame):
         
         # --- BODY ROW (Knobs / Settings) ---
         body = QHBoxLayout()
+        body.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         body.setSpacing(15)
         
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -223,6 +235,7 @@ class EffectCard(QFrame):
                         
         body.addStretch()
         layout.addLayout(body)
+        layout.addStretch()
         
         # Apply Card Styles
         self.setStyleSheet("""
@@ -535,6 +548,7 @@ class EffectsRack(QWidget):
         # --- MIDDLE PANEL: Scrolling list of cards ---
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("RackScrollArea")
+        self.scroll_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -543,6 +557,7 @@ class EffectsRack(QWidget):
         self.scroll_widget = EffectsContainer(self)
         self.scroll_widget.setObjectName("RackScrollWidget")
         self.scroll_layout = QHBoxLayout(self.scroll_widget)
+        self.scroll_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setSpacing(10)
         self.scroll_layout.addStretch()  # Pin elements to the left
@@ -736,8 +751,15 @@ class EffectsRack(QWidget):
                 new_dragged_card.setFixedWidth(val)
             self.reorder_anim_expand.valueChanged.connect(on_expand_val)
             def on_expand_finished():
-                new_dragged_card.setMinimumWidth(250)
-                new_dragged_card.setMaximumWidth(280)
+                num_knobs = 0
+                if new_dragged_card.wrapper.effect_type != "VST3":
+                    from project_manager import EFFECT_CLASSES
+                    if new_dragged_card.wrapper.effect_type in EFFECT_CLASSES:
+                        _, params = EFFECT_CLASSES[new_dragged_card.wrapper.effect_type]
+                        num_knobs = sum(1 for p in params if p in PARAM_METADATA)
+                cw = max(250, 30 + num_knobs * 80)
+                new_dragged_card.setMinimumWidth(cw)
+                new_dragged_card.setMaximumWidth(cw + 30)
                 new_dragged_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
                 new_dragged_card.updateGeometry()
             self.reorder_anim_expand.finished.connect(on_expand_finished)
