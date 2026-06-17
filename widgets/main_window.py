@@ -306,6 +306,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.action_add_track.triggered.connect(self.on_add_track)
         track_menu.addAction(self.action_add_track)
         
+        self.action_add_backing_track = QAction("Add Backing Track...", self)
+        self.action_add_backing_track.setShortcut(QKeySequence("Ctrl+B"))
+        self.action_add_backing_track.triggered.connect(self.on_add_backing_track)
+        track_menu.addAction(self.action_add_backing_track)
+        
         # Audio Menu
         audio_menu = menu_bar.addMenu("Audio")
         
@@ -1069,6 +1074,53 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             self.timeline.update_track_layout()
         if hasattr(self, 'mixer_widget'):
             self.mixer_widget.rebuild()
+
+    def on_add_backing_track(self):
+        """Prompts the user to select an audio file, creates a dedicated 'Backing Track' track,
+        loads the audio file, and inserts it at the beginning of the track."""
+        dlg = QFileDialog(self)
+        dlg.setWindowTitle("Import Backing Track")
+        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+        dlg.setNameFilter("Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a *.wma *.aiff *.aif);;All Files (*)")
+        dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        apply_dark_theme_to_hwnd(int(dlg.winId()))
+        
+        if dlg.exec() == QFileDialog.DialogCode.Accepted:
+            file_path = dlg.selectedFiles()[0]
+            QApplication.processEvents()
+            from widgets.loading_popup import LoadingPopup
+            popup = LoadingPopup("LOADING BACKING TRACK...", self)
+            popup.show()
+            QApplication.processEvents()
+            
+            try:
+                # Add a new track called "Backing Track"
+                new_track = self.audio_engine.add_track("Backing Track")
+                sample_rate = self.audio_engine.sample_rate
+                
+                # Load the audio file into an AudioItem at sample 0
+                from audio_engine import AudioItem
+                item = AudioItem(start_sample=0, sample_rate=sample_rate, file_path=file_path)
+                if item.audio_data is not None:
+                    with new_track.lock:
+                        new_track.items.append(item)
+                    new_track.update_pedalboard(self.audio_engine.sample_rate)
+                    
+                    self.refresh_track_cards()
+                    self.mark_project_dirty()
+                    if hasattr(self, 'timeline'):
+                        self.timeline.update_track_layout()
+                else:
+                    self.show_themed_message_box(
+                        "Error",
+                        "Failed to load backing track audio data.",
+                        QMessageBox.Icon.Critical
+                    )
+            finally:
+                popup.hide()
+                popup.close()
+                QApplication.processEvents()
+            self.mixer_widget.rebuild()
         
     def on_track_duplicated(self, track):
         new_name = f"{track.name} (Copy)"
@@ -1401,12 +1453,15 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                     f"Successfully saved session to:\n{os.path.basename(file_path)}",
                     QMessageBox.Icon.Information
                 )
+                return True
             else:
                 self.show_themed_message_box(
                     "Save Error",
                     "Failed to save project file.",
                     QMessageBox.Icon.Critical
                 )
+                return False
+        return False
  
     def on_export_audio(self):
         """Opens the export settings dialog to render timeline mixdown to file."""
@@ -1861,6 +1916,33 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
 
     def closeEvent(self, event):
         """Release audio stream explicitly when app terminates."""
+        if self.project_dirty:
+            reply = self.show_themed_message_box(
+                "Unsaved Changes",
+                "You have unsaved changes. Do you want to save them before exiting?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                if self.on_save_project():
+                    pass
+                else:
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+        else:
+            reply = self.show_themed_message_box(
+                "Exit Graphite",
+                "Are you sure you want to exit Graphite DAW?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
         self.audio_engine.stop_stream()
         try:
             self.close_active_vst()

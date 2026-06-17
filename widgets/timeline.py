@@ -393,9 +393,11 @@ class TimelineLanesWidget(QWidget):
             self.drag_track = None
             self.active_drag_mode = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
             
     def mouseDoubleClickEvent(self, event):
-        # Double-click empty track lane space to import WAV
+        # Double-click empty track lane space to import audio
         y = event.position().y()
         track_idx = int(y // self.lane_height)
         if track_idx < len(self.audio_engine.tracks):
@@ -404,9 +406,9 @@ class TimelineLanesWidget(QWidget):
             # Select file dialog
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Import Audio File (WAV)",
+                "Import Audio File",
                 "",
-                "Audio Files (*.wav)"
+                "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a *.wma *.aiff *.aif);;All Files (*)"
             )
             if file_path:
                 x = event.position().x()
@@ -421,6 +423,8 @@ class TimelineLanesWidget(QWidget):
                         track.items.append(item)
                     track.update_pedalboard(self.audio_engine.sample_rate)
                     self.update_geometry()
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.mark_project_dirty()
                     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
@@ -436,6 +440,8 @@ class TimelineLanesWidget(QWidget):
                 self.selected_track_for_item = None
                 self.update_geometry()
                 self.update()
+                if hasattr(self, 'main_window') and self.main_window:
+                    self.main_window.mark_project_dirty()
         elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_C:
                 if self.selected_item:
@@ -464,6 +470,8 @@ class TimelineLanesWidget(QWidget):
                     self.selected_track_for_item = None
                     self.update_geometry()
                     self.update()
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.mark_project_dirty()
             elif event.key() == Qt.Key.Key_V:
                 if hasattr(self, 'clipboard_clip') and self.clipboard_clip is not None:
                     target_track = None
@@ -490,6 +498,8 @@ class TimelineLanesWidget(QWidget):
                         self.selected_track_for_item = target_track
                         self.update_geometry()
                         self.update()
+                        if hasattr(self, 'main_window') and self.main_window:
+                            self.main_window.mark_project_dirty()
         else:
             super().keyPressEvent(event)
             
@@ -653,8 +663,9 @@ class TimelineLanesWidget(QWidget):
         start_sample = max(0, int((x / self.pixels_per_second) * sample_rate))
         track_idx = max(0, int(y // self.lane_height))
         
-        wav_files = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith('.wav')]
-        if not wav_files:
+        audio_extensions = ('.wav', '.mp3', '.flac', '.ogg', '.m4a', '.wma', '.aiff', '.aif')
+        audio_files = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith(audio_extensions)]
+        if not audio_files:
             return
             
         # If dropping below existing tracks, create a new track
@@ -665,16 +676,19 @@ class TimelineLanesWidget(QWidget):
         else:
             track = self.audio_engine.tracks[track_idx]
             
-        for file_path in wav_files:
+        for file_path in audio_files:
             if os.path.exists(file_path):
                 # Create and load AudioItem
                 item = AudioItem(start_sample, sample_rate, file_path=file_path)
                 if item.audio_data is not None:
+                    # Copy WAV next to project later, or keep path
                     with track.lock:
                         track.items.append(item)
                     track.update_pedalboard(self.audio_engine.sample_rate)
                     
         self.update_geometry()
+        if hasattr(self, 'main_window') and self.main_window:
+            self.main_window.mark_project_dirty()
 
     def dropEvent(self, event):
         pos = get_event_position(event)
