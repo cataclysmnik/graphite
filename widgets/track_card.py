@@ -152,12 +152,17 @@ class TrackCard(QFrame):
                 border: 1px solid #222225;
                 border-radius: 4px;
             }
+            TrackCard:hover {
+                background-color: #151518;
+                border-color: #88888c;
+            }
             TrackCard[selected="true"] {
                 background-color: #000000;
                 border: 1px solid #ffffff;
             }
-            TrackCard:hover {
-                border-color: #444448;
+            TrackCard[selected="true"]:hover {
+                background-color: #121214;
+                border-color: #ffffff;
             }
             
             QLabel#TrackNumberLabel {
@@ -331,7 +336,12 @@ class TrackCard(QFrame):
 
     def mousePressEvent(self, event):
         """Select track when clicking anywhere on the card."""
+        was_selected = self.is_selected
         self.set_selected(True)
+        if was_selected:
+            main_win = self.window()
+            if main_win and hasattr(main_win, 'on_track_selected'):
+                main_win.on_track_selected(self.track)
         if event.button() == Qt.MouseButton.LeftButton:
             self.drag_start_position = event.pos()
         super().mousePressEvent(event)
@@ -421,6 +431,15 @@ class TrackCard(QFrame):
     def on_arm_clicked(self):
         self.track.armed = self.btn_arm.isChecked()
         self.mark_dirty()
+        
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'btn_arm_exclusive') and main_win.btn_arm_exclusive.isChecked():
+            if self.track.armed:
+                for card in main_win.track_cards:
+                    if card != self:
+                        card.track.armed = False
+                        if hasattr(card, 'btn_arm'):
+                            card.btn_arm.setChecked(False)
         
     def on_input_changed(self):
         ch_data = self.combo_input.currentData()

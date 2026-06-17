@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QScrollArea, QFileDialog, QSplitter, QSlider,
     QMessageBox, QTabWidget, QFrame, QMenuBar, QSizeGrip, QStackedWidget,
-    QApplication
+    QApplication, QButtonGroup
 )
 from PySide6.QtCore import Qt, QTimer, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QFont, QIcon, QAction, QKeySequence
@@ -357,7 +357,83 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         top_workspace = QSplitter(Qt.Orientation.Horizontal)
         top_workspace.setObjectName("TopWorkspaceSplitter")
         
-        # Left Panel: Scrollable Track Headers List (TCP)
+        # Left Panel: Container for Toolbar and Scrollable Track Headers (TCP)
+        self.tcp_panel = QWidget()
+        self.tcp_panel.setObjectName("TcpPanel")
+        tcp_layout = QVBoxLayout(self.tcp_panel)
+        tcp_layout.setContentsMargins(0, 0, 0, 0)
+        tcp_layout.setSpacing(0)
+        
+        # New TCP settings/arming mode toolbar
+        self.tcp_toolbar = QWidget()
+        self.tcp_toolbar.setObjectName("TcpToolbar")
+        self.tcp_toolbar.setFixedHeight(31)  # Aligned to timeline toolbar height
+        self.tcp_toolbar.setStyleSheet("""
+            QWidget#TcpToolbar {
+                background-color: #000000;
+                border-bottom: 1px solid #222225;
+            }
+            QPushButton {
+                background-color: #0b0b0c;
+                border: 1px solid #222225;
+                border-radius: 4px;
+                color: #88888c;
+                font-family: "Consolas", monospace;
+                font-size: 10px;
+                font-weight: bold;
+                padding: 4px 6px;
+                min-height: 22px;
+            }
+            QPushButton:hover {
+                background-color: #1a1a1c;
+                border-color: #444448;
+                color: #ffffff;
+            }
+            QPushButton:checked {
+                background-color: #ff0033;
+                border-color: #ff0033;
+                color: #ffffff;
+            }
+        """)
+        
+        tcp_tb_layout = QHBoxLayout(self.tcp_toolbar)
+        tcp_tb_layout.setContentsMargins(10, 4, 10, 4)
+        tcp_tb_layout.setSpacing(6)
+        
+        self.arm_mode_group = QButtonGroup(self)
+        self.arm_mode_group.setExclusive(True)
+        
+        self.btn_arm_standard = QPushButton("STANDARD")
+        self.btn_arm_standard.setCheckable(True)
+        self.btn_arm_standard.setChecked(True)
+        self.arm_mode_group.addButton(self.btn_arm_standard)
+        tcp_tb_layout.addWidget(self.btn_arm_standard)
+        
+        self.btn_arm_union = QPushButton("UNION")
+        self.btn_arm_union.setCheckable(True)
+        self.arm_mode_group.addButton(self.btn_arm_union)
+        tcp_tb_layout.addWidget(self.btn_arm_union)
+        
+        self.btn_arm_exclusive = QPushButton("EXCLUSIVE")
+        self.btn_arm_exclusive.setCheckable(True)
+        self.arm_mode_group.addButton(self.btn_arm_exclusive)
+        tcp_tb_layout.addWidget(self.btn_arm_exclusive)
+        
+        tcp_tb_layout.addStretch()
+        tcp_layout.addWidget(self.tcp_toolbar)
+        
+        # Spacer widget of 30px to align tracklist cards horizontally with timeline track lanes
+        self.tcp_spacer = QWidget()
+        self.tcp_spacer.setObjectName("TcpSpacer")
+        self.tcp_spacer.setFixedHeight(30)
+        self.tcp_spacer.setStyleSheet("""
+            QWidget#TcpSpacer {
+                background-color: #000000;
+                border-bottom: 1px solid #222225;
+            }
+        """)
+        tcp_layout.addWidget(self.tcp_spacer)
+        
         self.tracks_scroll = QScrollArea()
         self.tracks_scroll.setObjectName("TracksScrollArea")
         self.tracks_scroll.setWidgetResizable(True)
@@ -372,7 +448,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.tracks_layout.addStretch()
         
         self.tracks_scroll.setWidget(self.tracks_container)
-        top_workspace.addWidget(self.tracks_scroll)
+        tcp_layout.addWidget(self.tracks_scroll)
+        top_workspace.addWidget(self.tcp_panel)
         
         # Right Panel: Waveform Timeline
         self.timeline = TimelineScrollContainer(self.audio_engine, self)
@@ -942,11 +1019,29 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.close_active_vst(switch_tab=False)
         self.selected_track = track
         self.audio_engine.selected_track_id = track.track_id if track else None
+        
+        # Check current arming mode
+        if hasattr(self, 'btn_arm_union') and self.btn_arm_union.isChecked():
+            if track:
+                track.armed = not track.armed
+                self.mark_project_dirty()
+        elif hasattr(self, 'btn_arm_exclusive') and self.btn_arm_exclusive.isChecked():
+            for t in self.audio_engine.tracks:
+                was_armed = t.armed
+                if track and t == track:
+                    t.armed = True
+                else:
+                    t.armed = False
+                if t.armed != was_armed:
+                    self.mark_project_dirty()
+                    
         for card in self.track_cards:
             if card.track == track:
                 card.set_selected(True)
             else:
                 card.set_selected(False)
+            if hasattr(card, 'btn_arm'):
+                card.btn_arm.setChecked(card.track.armed)
                 
         # Link to effects rack
         self.effects_rack.set_track(track)
