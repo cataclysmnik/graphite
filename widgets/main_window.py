@@ -476,13 +476,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
         self._dock_pinned = True
         
-        import os
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icons_dir = os.path.join(base_dir, "public", "icons")
+        from theme_utils import get_resource_path
         from PySide6.QtGui import QIcon
         from PySide6.QtCore import QSize
-        self.icon_pin = QIcon(os.path.join(icons_dir, "pin.svg"))
-        self.icon_unpin = QIcon(os.path.join(icons_dir, "unpin.svg"))
+        self.icon_pin = QIcon(get_resource_path("public/icons/pin.svg"))
+        self.icon_unpin = QIcon(get_resource_path("public/icons/unpin.svg"))
         
         self.btn_dock_pin = QPushButton()
         self.btn_dock_pin.setIcon(self.icon_pin)

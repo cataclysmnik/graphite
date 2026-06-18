@@ -1,106 +1,140 @@
 # Graphite Guitar DAW
-[![Ask DeepWiki](https://devin.ai/assets/askdeepwiki.png)](https://deepwiki.com/cataclysmnik/guitar-daw)
 
-Graphite is a lightweight, performant Digital Audio Workstation (DAW) designed for guitarists. Built with Python and PySide6, it provides a clean, native-feeling interface for recording, processing, and arranging guitar tracks. It leverages the `pedalboard` library for powerful real-time audio effects, including support for VST3 plugins. The UI is heavily customized with a sleek, dark aesthetic inspired by the "Nothing" design language.
+[![GitHub Release](https://img.shields.io/github/v/release/cataclysmnik/graphite?color=000000&label=Release&style=flat-square)](https://github.com/cataclysmnik/graphite/releases)
+[![Python Version](https://img.shields.io/badge/python-3.8+-blue.svg?color=000000&style=flat-square)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg?color=000000&style=flat-square)](LICENSE)
+
+Graphite is a lightweight, high-performance Digital Audio Workstation (DAW) tailored specifically for guitarists. Built with Python and PySide6, it delivers a sleek, low-latency recording environment optimized for real-time performance and host-based digital signal processing (DSP). 
+
+With a premium dark aesthetic inspired by the "Nothing" design language, Graphite features a custom frameless window, responsive vector-based waveforms, and support for VST3 plugins via Spotify's `pedalboard` engine.
+
+---
 
 ## Key Features
 
-- **Real-time Audio Engine:** Low-latency audio processing powered by `sounddevice` and `pedalboard`. Supports ASIO, WASAPI, and MME for wide hardware compatibility.
-- **VST3 Plugin Support:** Load, manage, and save your favorite VST3 plugins within the effects rack. The engine isolates plugin instances to prevent state conflicts.
-- **Multi-Track Timeline:** A non-destructive timeline editor for arranging, moving, and resizing audio clips.
-- **Integrated Effects & Utilities:**
-    - A suite of built-in effects including a custom `TubeOverdrive`, Reverb, Delay, Chorus, and Compressor.
-    - A high-precision chromatic **Guitar Tuner**.
-    - A visual **Metronome** with tap tempo.
-- **Advanced Mixer:** A dedicated mixer view with faders, pan knobs, and level meters for each track.
-- **Offline Rendering:** Export your projects to high-quality WAV (16/24-bit) or MP3 files.
-- **Project Management:** Save and load your complete sessions, including track settings, audio clips, and full VST3 plugin states, in the `.graphite` file format.
-- **Custom UI:** A fast, responsive, and visually distinct user interface built from the ground up with PySide6, featuring a custom frameless window implementation for a modern look on Windows.
+- **High-Performance Audio Engine:** 
+  - Low-latency real-time audio thread utilizing `sounddevice` and `pedalboard`.
+  - Lock-free and allocation-free audio callback path to prevent audio dropouts (crackles/pops) even with complex VST3 chains.
+  - Wide hardware driver support including ASIO (recommended on Windows), WASAPI, DirectSound, and MME.
+- **Dynamic Auto-Arm Zones:**
+  - Create timeline-based auto-arm regions to automatically arm and disarm tracks at specific parts of a song.
+  - Supports non-destructive recording clip trimming to match defined arming zones exactly.
+  - Move, resize, and drag auto-arm regions between tracks.
+- **Advanced Track Arming Modes:**
+  - **Standard**: Manual toggling of track recording states.
+  - **Union**: Allows simultaneous recording on multiple armed tracks.
+  - **Exclusive**: Arming one track automatically disarms all other tracks to streamline single-input takes.
+- **VST3 Host & Signal Flow:**
+  - Load, reorder, and configure VST3 plugins dynamically.
+  - A visual, vertical **Signal Flow Editor** to easily inspect and reorder the effects chain.
+  - Built-in pedal simulations: `TubeOverdrive`, Reverb, Delay, Chorus, and Compressor.
+- **Built-in Guitarist Tools:**
+  - **Guitar Tuner**: A high-precision chromatic tuner.
+  - **Visual Metronome**: Metronome with custom sound options and tap tempo.
+- **Modern Timeline & Mixer:**
+  - Non-destructive clip editing, resizing, and track management.
+  - Dedicated multi-channel mixer with pan, volume faders, and peak meters.
+  - Drag-and-drop support to import external `.wav` files directly into track lanes.
+- **Project Serialization & Export:**
+  - Save full sessions including all track layouts, audio clips, and full VST3 plugin states in JSON-based `.graphite` format.
+  - Export final master mixes to high-fidelity WAV (16/24-bit) or MP3 formats.
 
-## Technology Stack
+---
 
-- **Core:** Python 3
-- **GUI:** PySide6 (Qt for Python)
-- **Audio I/O:** `sounddevice`
-- **Effects & VST Hosting:** `pedalboard`
-- **DSP & Data Manipulation:** `numpy`
-- **Audio File I/O:** `soundfile`
+## Installation
 
-## Getting Started
+### Method 1: Using Pre-built Executable (Recommended for general use)
+If you do not want to install Python, you can download a standalone build:
+1. Navigate to the **[Releases Tab](https://github.com/cataclysmnik/graphite/releases)** on GitHub.
+2. Download the latest `Graphite-Windows-x64.zip` release package.
+3. Extract the ZIP archive to a folder of your choice.
+4. Double-click `Graphite.exe` to launch the application.
 
-### Prerequisites
+> [!NOTE]
+> Standalone builds include a bundled Python runtime and all necessary dependencies out-of-the-box.
 
-- Python 3.8+
-- A VST3-compatible audio plugin host (if you intend to use VST3 plugins)
-- An audio interface (ASIO drivers recommended on Windows for best performance)
+### Method 2: Installing from Source (Git Clone)
+To run or develop Graphite locally from source:
 
-### Installation
+#### 1. Prerequisites
+Ensure you have the following installed on your machine:
+- **Python 3.10 or higher** (Ensure Python is added to your system `PATH`)
+- **ASIO Drivers** (e.g., ASIO4ALL or your audio interface's native ASIO driver) for low-latency recording.
 
-1.  **Clone the repository:**
-    ```sh
-    git clone https://github.com/cataclysmnik/guitar-daw.git
-    cd guitar-daw
-    ```
+#### 2. Clone the Repository
+```bash
+git clone https://github.com/cataclysmnik/graphite.git
+cd graphite
+```
 
-2.  **Install the required Python packages:**
-    ```sh
-    pip install -r requirements.txt
-    ```
-    The key dependencies are:
-    - `PySide6`
-    - `numpy`
-    - `sounddevice`
-    - `pedalboard`
-    - `soundfile`
+#### 3. Create a Virtual Environment (Recommended)
+```bash
+python -m venv .venv
+# Activate on Windows:
+.venv\Scripts\activate
+# Activate on macOS/Linux:
+source .venv/bin/activate
+```
 
-### Running the Application
+#### 4. Install Dependencies
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-Execute the main script to launch the DAW:
-
-```sh
+#### 5. Launch the Application
+```bash
 python main.py
 ```
 
-## Usage
+---
 
-1.  **Audio Setup:**
-    - On first launch, navigate to `Audio > Audio Device Settings...` (or press `Ctrl+,`).
-    - Select your audio system (e.g., ASIO, WASAPI) and your audio interface as the input/output device.
-    - Configure your channel ranges and buffer size for optimal latency.
+## Usage Guide
 
-2.  **Adding Effects:**
-    - Select a track by clicking on its header in the left panel.
-    - The bottom dock will show the "Effects" tab for the selected track.
-    - Use the "Add Built-in Effect" dropdown or the "Load VST3" button to build your effects chain.
-    - Drag and drop effects in the rack or the right-hand signal flow view to reorder them.
+### 1. Configure Your Audio Interface
+Before recording, set up your audio settings to minimize latency:
+1. Open settings via **Audio > Audio Device Settings...** (or press `Ctrl + ,`).
+2. Select your driver model (choose **ASIO** on Windows for optimal performance).
+3. Select your input/output devices and set the active channel range.
+4. Set the buffer size (e.g., **128** or **256** samples) to achieve optimal latency without introducing buffer under-runs.
 
-3.  **Recording:**
-    - Arm a track by clicking the 'R' button on its card.
-    - Click the record button (●) in the timeline toolbar or press `R` to start recording.
-    - Click play/pause or stop to end the recording. The new audio clip will appear on the timeline.
+### 2. Working with Auto-Arm Zones
+Auto-arm zones allow you to define exactly when specific tracks should record or play back:
+- **Create a Zone:** Hold `Shift` and double-click in an empty space on any track lane.
+- **Move / Drag:** Click and drag the center of the zone to reposition it in time or move it to a different track.
+- **Resize:** Click and drag the left or right edges of the zone to adjust the exact start and end times.
+- **Record:** When recording starts, Graphite will automatically arm and record audio only when the playhead enters these zones.
 
-4.  **Arrangement:**
-    - Click and drag audio clips on the timeline to move them.
-    - Hover over the left or right edge of a clip and drag to resize it.
-    - Drag and drop WAV files from your file explorer directly onto the timeline to import them.
+### 3. Adding and Reordering Effects
+- Select a track to display its effects rack in the bottom dock.
+- Click **Add Built-in Effect** to add high-quality native guitar pedals, or click **Load VST3** to load external plugin files (`.vst3`).
+- Drag-and-drop effects in the list to change their placement in the audio processing chain.
 
-5.  **Saving and Loading:**
-    - Use `File > Save Project` (`Ctrl+S`) to save your session as a `.graphite` file.
-    - Use `File > Open Project...` (`Ctrl+O`) to load a previously saved session.
+---
 
 ## Project Structure
 
-- `main.py`: The application entry point. Initializes the QApplication and MainWindow.
-- `audio_engine.py`: The core of the DAW. Manages audio I/O streams, track-based DSP, mixing, recording logic, and VST handling.
-- `project_manager.py`: Handles serialization and deserialization of the entire project state to/from `.graphite` JSON files.
-- `theme_utils.py`: Contains helper functions and mixins for the custom frameless window and dark theme styling on Windows.
-- `widgets/`: This directory contains all the PySide6 UI components.
-  - `main_window.py`: The main application window, orchestrating all other widgets.
-  - `track_card.py`: The UI for a single track header in the left-side panel.
-  - `effects_rack.py`: The UI for managing a track's effects chain, including VST loading menus.
-  - `timeline.py`: Contains the time ruler, transport controls, and the scrollable lanes for audio clips.
-  - `mixer.py`: The dedicated channel strip and master fader view.
-  - `tuner.py` & `metronome.py`: The integrated guitar tuner and metronome widgets.
-  - `audio_settings.py`: The advanced audio device configuration dialog.
-  - `signal_flow.py`: The vertical node-based view of the effects chain.
-  - `splash.py`: The custom-drawn startup splash screen.
+- `main.py` - Application entry point; handles GUI bootstrapping.
+- `audio_engine.py` - Core lock-free audio thread handling real-time I/O, VSTs, and mixing.
+- `project_manager.py` - Controls saving/loading of `.graphite` project files.
+- `theme_utils.py` - Custom frameless title bar and Windows DWM integration.
+- `widgets/` - PySide6 custom widgets:
+  - `main_window.py` - Main workspace coordinator.
+  - `timeline.py` - Timeline arranger, auto-arm zones, and ruler.
+  - `mixer.py` - Master faders and channel strip components.
+  - `effects_rack.py` - Built-in pedals and VST hosting interface.
+  - `tuner.py` / `metronome.py` - Precision utilities for guitar practice.
+
+---
+
+## Troubleshooting
+
+- **No Sound / Audio Device Error:** Make sure your audio interface is not being used exclusively by another program. Select a different host API (e.g. WASAPI instead of ASIO) if testing on a system without dedicated ASIO hardware.
+- **Audio Crackles or Pops:** Increase your buffer size (e.g., from 64 to 128 or 256 samples) in the Audio Settings dialog.
+- **VST3 Failures:** Ensure you are loading 64-bit VST3 plugins (`.vst3` folders or files) that match your system architecture.
+
+---
+
+## License
+
+Graphite is distributed under the MIT License. See `LICENSE` for details.

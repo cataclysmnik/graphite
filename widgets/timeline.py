@@ -879,15 +879,14 @@ class TimelineScrollContainer(QWidget):
         tb_layout.setSpacing(8)
         
         # Resolve paths to public/icons
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        icons_dir = os.path.join(base_dir, "public", "icons")
+        from theme_utils import get_resource_path
         
-        icon_stop = QIcon(os.path.join(icons_dir, "stop.svg"))
-        icon_play = QIcon(os.path.join(icons_dir, "play.svg"))
-        icon_pause = QIcon(os.path.join(icons_dir, "pause.svg"))
-        icon_record = QIcon(os.path.join(icons_dir, "record.svg"))
-        icon_prev = QIcon(os.path.join(icons_dir, "previous.svg"))
-        icon_ff = QIcon(os.path.join(icons_dir, "fastforward.svg"))
+        icon_stop = QIcon(get_resource_path("public/icons/stop.svg"))
+        icon_play = QIcon(get_resource_path("public/icons/play.svg"))
+        icon_pause = QIcon(get_resource_path("public/icons/pause.svg"))
+        icon_record = QIcon(get_resource_path("public/icons/record.svg"))
+        icon_prev = QIcon(get_resource_path("public/icons/previous.svg"))
+        icon_ff = QIcon(get_resource_path("public/icons/fastforward.svg"))
         
         icon_size = QSize(12, 12)
         

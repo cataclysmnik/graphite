@@ -1,9 +1,17 @@
 import platform
 import ctypes
+import os
+import sys
 from ctypes import wintypes
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt, QPoint
 from PySide6.QtGui import QFont, QMouseEvent
+
+def get_resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 # Win32 Constants for native resizing and dragging
 WM_NCCALCSIZE = 0x0083

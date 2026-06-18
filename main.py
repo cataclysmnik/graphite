@@ -27,7 +27,8 @@ def main():
     app = QApplication(sys.argv)
     
     from PySide6.QtGui import QIcon
-    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.svg")
+    from theme_utils import get_resource_path
+    logo_path = get_resource_path("logo.ico")
     if os.path.exists(logo_path):
         app.setWindowIcon(QIcon(logo_path))
     
