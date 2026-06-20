@@ -170,6 +170,7 @@ class TimelineLanesWidget(QWidget):
         self.selected_item = None
         self.selected_track_for_item = None
         self.clipboard_clip = None
+        self.live_recording_cache = {}
         
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -648,23 +649,42 @@ class TimelineLanesWidget(QWidget):
                     
                 # Prepare live recording item if track is recording
                 is_recording = (self.audio_engine.play_state == "recording")
+                if not is_recording and self.live_recording_cache:
+                    self.live_recording_cache.clear()
+                    
                 live_item = None
                 has_arm_regions = len(getattr(track, "arm_regions", [])) > 0
                 if is_recording and (track.armed or has_arm_regions):
+                    buffers_copy = None
                     with self.audio_engine.lock:
                         buffers = self.audio_engine.recording_buffers.get(track.track_id)
-                        if buffers and len(buffers) > 0:
-                            try:
-                                live_data = np.concatenate(buffers)
-                                live_audio_data = np.reshape(live_data, (1, -1))
-                                live_item = AudioItem(
-                                    start_sample=self.audio_engine.recording_start_sample,
-                                    sample_rate=self.audio_engine.sample_rate,
-                                    file_path=None,
-                                    audio_data=live_audio_data
-                                )
-                            except Exception as e:
-                                print(f"Error drawing live recording: {e}")
+                        if buffers:
+                            buffers_copy = list(buffers)
+                            
+                    if buffers_copy:
+                        try:
+                            cache = self.live_recording_cache.setdefault(track.track_id, {
+                                "buffers_count": 0,
+                                "cached_array": np.zeros(0, dtype=np.float32)
+                            })
+                            
+                            if len(buffers_copy) > cache["buffers_count"]:
+                                new_buffers = buffers_copy[cache["buffers_count"]:]
+                                if new_buffers:
+                                    new_data = np.concatenate(new_buffers)
+                                    cache["cached_array"] = np.concatenate([cache["cached_array"], new_data])
+                                cache["buffers_count"] = len(buffers_copy)
+                                
+                            live_data = cache["cached_array"]
+                            live_audio_data = np.reshape(live_data, (1, -1))
+                            live_item = AudioItem(
+                                start_sample=self.audio_engine.recording_start_sample,
+                                sample_rate=self.audio_engine.sample_rate,
+                                file_path=None,
+                                audio_data=live_audio_data
+                            )
+                        except Exception as e:
+                            print(f"Error drawing live recording: {e}")
                                 
                 items_to_draw = list(items_copy)
                 if live_item is not None:
