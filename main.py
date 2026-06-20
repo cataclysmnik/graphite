@@ -7,7 +7,7 @@ import numpy as np
 import pedalboard
 try:
     _dummy_board = pedalboard.Pedalboard([])
-    _dummy_board(np.zeros((1, 128), dtype=np.float32), 44100)
+    _dummy_board(np.zeros((2, 128), dtype=np.float32), 44100)
 except Exception:
     pass
 

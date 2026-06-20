@@ -326,7 +326,7 @@ class Track:
             # initialization to happen on the main thread before the audio callback uses it.
             try:
                 import numpy as np
-                dummy_in = np.zeros((1, 128), dtype=np.float32)
+                dummy_in = np.zeros((2, 128), dtype=np.float32)
                 self.pedalboard(dummy_in, sample_rate)
             except Exception as e:
                 print(f"Warning: Dummy pedalboard initialization failed: {e}")
@@ -851,7 +851,7 @@ class AudioEngine:
                             continue
                             
                         # Fetch track items playback
-                        track_playback = np.zeros(frames, dtype=np.float32)
+                        track_playback = np.zeros((2, frames), dtype=np.float32)
                         with track.lock:
                             items = list(track.items)
                             
@@ -878,17 +878,20 @@ class AudioEngine:
                                 # Resample the sub-segment of item.audio_data to target sample rate
                                 orig_start = item.offset_samples + int((read_start / sample_rate) * item.sample_rate)
                                 orig_end = item.offset_samples + int((read_end / sample_rate) * item.sample_rate)
-                                orig_chunk = item.audio_data[0, orig_start:orig_end]
                                 
-                                if len(orig_chunk) > 0:
-                                    # Resample orig_chunk to length
-                                    orig_indices = np.arange(len(orig_chunk))
-                                    target_indices = np.linspace(0, len(orig_chunk) - 1, length)
-                                    resampled_chunk = np.interp(target_indices, orig_indices, orig_chunk)
-                                    track_playback[write_offset : write_offset + length] += resampled_chunk
+                                item_ch = item.audio_data.shape[0]
+                                for ch in range(2):
+                                    read_ch = ch if ch < item_ch else 0
+                                    orig_chunk = item.audio_data[read_ch, orig_start:orig_end]
+                                    if len(orig_chunk) > 0:
+                                        # Resample orig_chunk to length
+                                        orig_indices = np.arange(len(orig_chunk))
+                                        target_indices = np.linspace(0, len(orig_chunk) - 1, length)
+                                        resampled_chunk = np.interp(target_indices, orig_indices, orig_chunk)
+                                        track_playback[ch, write_offset : write_offset + length] += resampled_chunk
                                     
                         # Process through track effects sequentially
-                        pedalboard_in = np.reshape(track_playback, (1, -1)).astype(np.float32)
+                        pedalboard_in = track_playback.astype(np.float32)
                         current_signal = pedalboard_in.copy()
                         try:
                             with track.lock:
@@ -1017,8 +1020,7 @@ class AudioEngine:
                     rec_list.append(self.zero_block[:frames])
                 
         # 2. Fetch playback from recorded items (if play is active)
-        playback_in = self._playback_buf[:frames]
-        playback_in.fill(0)
+        playback_in = np.zeros((2, frames), dtype=np.float32)
         if play_active:
             with track.lock:
                 items_copy = list(track.items)
@@ -1037,16 +1039,22 @@ class AudioEngine:
                     read_offset = (overlap_start - item_start) + item.offset_samples
                     write_offset = overlap_start - curr_playhead
                     length = overlap_end - overlap_start
-                    playback_in[write_offset : write_offset + length] += item.audio_data[0, read_offset : read_offset + length]
+                    
+                    item_ch = item.audio_data.shape[0]
+                    for ch in range(2):
+                        read_ch = ch if ch < item_ch else 0
+                        playback_in[ch, write_offset : write_offset + length] += item.audio_data[read_ch, read_offset : read_offset + length]
                     
         # Mix real-time input and playback items
         if is_armed:
-            track_in = realtime_in + playback_in
+            track_in = playback_in.copy()
+            track_in[0, :] += realtime_in
+            track_in[1, :] += realtime_in
         else:
             track_in = playback_in
             
         # 3. Reshape mono input to pedalboard's expected format (channels, samples)
-        pedalboard_in = np.reshape(track_in, (1, -1))
+        pedalboard_in = track_in
         
         # 3. Apply track effects sequentially (if active)
         has_active_effects = any(wrap.is_active for wrap in track.effects)
