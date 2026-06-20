@@ -171,6 +171,9 @@ class TimelineLanesWidget(QWidget):
         self.selected_track_for_item = None
         self.clipboard_clip = None
         self.live_recording_cache = {}
+        self.selected_items = set()
+        self.box_select_start = None
+        self.box_select_current = None
         
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -302,6 +305,11 @@ class TimelineLanesWidget(QWidget):
             self.trackSelected.emit(track_idx)
             
         if target and track:
+            modifiers = event.modifiers()
+            if not (modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
+                self.selected_items.clear()
+            self.selected_items.add(target)
+            
             self.selected_item = target
             self.selected_target_type = target_type
             self.selected_track_for_item = track
@@ -332,6 +340,7 @@ class TimelineLanesWidget(QWidget):
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.update()
         else:
+            self.selected_items.clear()
             self.selected_item = None
             self.selected_target_type = None
             self.selected_track_for_item = None
@@ -339,6 +348,10 @@ class TimelineLanesWidget(QWidget):
             self.active_drag_target_type = None
             self.active_drag_mode = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            
+            # Start box select tracking
+            self.box_select_start = event.position()
+            self.box_select_current = event.position()
             
             # Set playhead position on empty lane
             time_seconds = max(0.0, x / self.pixels_per_second)
@@ -438,6 +451,39 @@ class TimelineLanesWidget(QWidget):
                         self.active_drag_item[1] = self.drag_start_sample + new_length
                     
             self.update_geometry()
+        elif self.box_select_start is not None:
+            self.box_select_current = event.position()
+            
+            select_rect = QRectF(self.box_select_start, self.box_select_current).normalized()
+            
+            self.selected_items.clear()
+            self.selected_item = None
+            
+            # Select items intersecting the selection rectangle
+            for track_idx, track in enumerate(self.audio_engine.tracks):
+                y_top = track_idx * self.lane_height + 5
+                draw_h = self.lane_height - 10
+                
+                with track.lock:
+                    items_copy = list(track.items)
+                    
+                for item in items_copy:
+                    if item.audio_data is None:
+                        continue
+                        
+                    item_len = item.length_samples
+                    start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+                    end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
+                    item_width = max(2, end_x - start_x)
+                    
+                    item_rect = QRectF(start_x, y_top, item_width, draw_h)
+                    if select_rect.intersects(item_rect):
+                        self.selected_items.add(item)
+                        # Set primary selected item for compatibility
+                        self.selected_item = item
+                        self.selected_target_type = "item"
+                        self.selected_track_for_item = track
+            self.update()
         else:
             # Hover cursor update
             target, target_type, track, hover_type = self.get_hover_state(x, y)
@@ -457,6 +503,10 @@ class TimelineLanesWidget(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             if hasattr(self, 'main_window') and self.main_window:
                 self.main_window.mark_project_dirty()
+        elif self.box_select_start is not None:
+            self.box_select_start = None
+            self.box_select_current = None
+            self.update()
             
     def mouseDoubleClickEvent(self, event):
         # Double-click empty track lane space to import audio or create Auto-Arm zone
@@ -507,19 +557,36 @@ class TimelineLanesWidget(QWidget):
                     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
-            if self.selected_item and self.selected_track_for_item:
+            deleted_any = False
+            for target in list(self.selected_items):
+                for track in self.audio_engine.tracks:
+                    with track.lock:
+                        if target in track.items:
+                            track.items.remove(target)
+                            deleted_any = True
+                            break
+                        elif hasattr(track, "arm_regions") and target in track.arm_regions:
+                            track.arm_regions.remove(target)
+                            deleted_any = True
+                            break
+            
+            if self.selected_item and not deleted_any:
                 track = self.selected_track_for_item
                 target = self.selected_item
                 target_type = getattr(self, "selected_target_type", "item")
-                
-                with track.lock:
-                    if target_type == "item":
-                        if target in track.items:
-                            track.items.remove(target)
-                    else: # arm_region
-                        if hasattr(track, "arm_regions") and target in track.arm_regions:
-                            track.arm_regions.remove(target)
-                
+                if track:
+                    with track.lock:
+                        if target_type == "item":
+                            if target in track.items:
+                                track.items.remove(target)
+                                deleted_any = True
+                        else:
+                            if hasattr(track, "arm_regions") and target in track.arm_regions:
+                                track.arm_regions.remove(target)
+                                deleted_any = True
+                                
+            if deleted_any:
+                self.selected_items.clear()
                 self.selected_item = None
                 self.selected_target_type = None
                 self.selected_track_for_item = None
@@ -628,7 +695,7 @@ class TimelineLanesWidget(QWidget):
                     region_width = max(2, end_x - start_x)
                     
                     rect = QRectF(start_x, y_top, region_width, draw_h)
-                    is_selected = (self.selected_item == region)
+                    is_selected = (self.selected_item == region or region in self.selected_items)
                     
                     if is_selected:
                         painter.setBrush(QBrush(QColor(255, 68, 68, 85)))
@@ -707,7 +774,7 @@ class TimelineLanesWidget(QWidget):
                     if is_live:
                         painter.setBrush(QBrush(QColor("#2a0a0d")))
                         painter.setPen(QPen(QColor("#ff0033"), 1.0))
-                    elif item == self.selected_item:
+                    elif item in self.selected_items or item == self.selected_item:
                         painter.setBrush(QBrush(QColor("#000000")))
                         painter.setPen(QPen(QColor("#ffffff"), 1.5))
                     else:
@@ -774,6 +841,15 @@ class TimelineLanesWidget(QWidget):
             
             painter.setPen(QPen(QColor("#ff0033"), 1.2))
             painter.drawLine(playhead_x, 0, playhead_x, h)
+            
+            # 4. Draw Box Selection Rectangle
+            if self.box_select_start is not None and self.box_select_current is not None:
+                select_rect = QRectF(self.box_select_start, self.box_select_current).normalized()
+                # Draw filled transparent rectangle
+                painter.setBrush(QBrush(QColor(255, 255, 255, 30)))
+                # Draw white dashed border
+                painter.setPen(QPen(QColor("#ffffff"), 1.0, Qt.PenStyle.DashLine))
+                painter.drawRect(select_rect)
         finally:
             painter.end()
 
