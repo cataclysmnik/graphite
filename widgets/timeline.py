@@ -248,6 +248,20 @@ class TimelineLanesWidget(QWidget):
         self.box_select_start = None
         self.box_select_current = None
         
+        self.right_drag_active = False
+        self.right_drag_start_x = 0
+        self.right_drag_current_x = 0
+        self.right_drag_start_sample = 0
+        self.right_drag_track = None
+        
+        self.comp_swipe_item = None
+        self.comp_swipe_take_idx = None
+        self.comp_swipe_start_sample = None
+        
+        self.right_swipe_item = None
+        self.right_swipe_take_idx = None
+        self.right_swipe_start_sample = None
+        
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAcceptDrops(True)
@@ -365,221 +379,6 @@ class TimelineLanesWidget(QWidget):
             return best_target, best_target_type, track, best_type
         return None, None, None, None
 
-    def mousePressEvent(self, event):
-        self.setFocus()  # Ensure widget gets focus so it can receive key events!
-        x = event.position().x()
-        y = event.position().y()
-        
-        target, target_type, track, hover_type = self.get_hover_state(x, y)
-        
-        # Emit track selection even if clicked on empty space
-        track_idx = int(y // self.lane_height)
-        if track_idx < len(self.audio_engine.tracks):
-            self.trackSelected.emit(track_idx)
-            
-        if target and track:
-            modifiers = event.modifiers()
-            if not (modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
-                self.selected_items.clear()
-            self.selected_items.add(target)
-            
-            self.selected_item = target
-            self.selected_target_type = target_type
-            self.selected_track_for_item = track
-            
-            self.active_drag_item = target
-            self.active_drag_target_type = target_type
-            self.drag_track = track
-            self.active_drag_mode = hover_type
-            
-            sample_rate = self.audio_engine.sample_rate
-            click_sample = int((x / self.pixels_per_second) * sample_rate)
-            
-            # Store initial states
-            self.drag_click_x = x
-            if target_type == "item":
-                self.drag_start_sample = target.start_sample
-                self.drag_offset_samples = target.offset_samples
-                self.drag_length_samples = target.length_samples
-                self.drag_offset_samples_click = click_sample - target.start_sample
-            else: # arm_region
-                self.drag_start_sample = target[0]
-                self.drag_length_samples = target[1] - target[0]
-                self.drag_offset_samples_click = click_sample - target[0]
-            
-            if hover_type in ("resize_left", "resize_right"):
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
-            elif hover_type == "move":
-                self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self.update()
-        else:
-            self.selected_items.clear()
-            self.selected_item = None
-            self.selected_target_type = None
-            self.selected_track_for_item = None
-            self.active_drag_item = None
-            self.active_drag_target_type = None
-            self.active_drag_mode = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            
-            # Start box select tracking
-            self.box_select_start = event.position()
-            self.box_select_current = event.position()
-            
-            # Set playhead position on empty lane
-            time_seconds = max(0.0, x / self.pixels_per_second)
-            self.timeClicked.emit(time_seconds)
-            self.update()
-            
-    def mouseMoveEvent(self, event):
-        x = event.position().x()
-        y = event.position().y()
-        
-        if self.active_drag_item:
-            sample_rate = self.audio_engine.sample_rate
-            target_type = self.active_drag_target_type
-            
-            if self.active_drag_mode == "move":
-                new_start = int((x / self.pixels_per_second) * sample_rate) - self.drag_offset_samples_click
-                new_start = max(0, new_start)
-                if target_type == "item":
-                    with self.drag_track.lock:
-                        self.active_drag_item.start_sample = new_start
-                else: # arm_region
-                    with self.drag_track.lock:
-                        self.active_drag_item[0] = new_start
-                        self.active_drag_item[1] = new_start + self.drag_length_samples
-                    
-                # Shift clip/region between tracks when dragging vertically
-                target_track_idx = int(y // self.lane_height)
-                target_track_idx = max(0, min(len(self.audio_engine.tracks) - 1, target_track_idx))
-                target_track = self.audio_engine.tracks[target_track_idx]
-                if target_track != self.drag_track:
-                    if target_type == "item":
-                        with self.drag_track.lock:
-                            if self.active_drag_item in self.drag_track.items:
-                                self.drag_track.items.remove(self.active_drag_item)
-                        with target_track.lock:
-                            target_track.items.append(self.active_drag_item)
-                    else: # arm_region
-                        with self.drag_track.lock:
-                            if self.active_drag_item in getattr(self.drag_track, "arm_regions", []):
-                                self.drag_track.arm_regions.remove(self.active_drag_item)
-                        with target_track.lock:
-                            if not hasattr(target_track, "arm_regions"):
-                                target_track.arm_regions = []
-                            target_track.arm_regions.append(self.active_drag_item)
-                    self.drag_track = target_track
-                    self.selected_track_for_item = target_track
-            
-            elif self.active_drag_mode == "resize_left":
-                timeline_end = self.drag_start_sample + self.drag_length_samples
-                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
-                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
-                delta_samples = mouse_sample - click_mouse_sample
-                
-                new_start = self.drag_start_sample + delta_samples
-                new_start = max(0, new_start)
-                
-                # Minimum length of 50ms
-                min_len = int(0.05 * sample_rate)
-                max_allowed_start = timeline_end - min_len
-                new_start = min(new_start, max_allowed_start)
-                
-                if target_type == "item":
-                    actual_delta = new_start - self.drag_start_sample
-                    new_offset = self.drag_offset_samples + actual_delta
-                    
-                    # Check bounds for new_offset
-                    max_offset = self.active_drag_item.audio_data.shape[1] - min_len
-                    new_offset = max(0, min(new_offset, max_offset))
-                    
-                    actual_delta = new_offset - self.drag_offset_samples
-                    new_start = self.drag_start_sample + actual_delta
-                    new_length = timeline_end - new_start
-                    
-                    with self.drag_track.lock:
-                        self.active_drag_item.start_sample = new_start
-                        self.active_drag_item.offset_samples = new_offset
-                        self.active_drag_item.length_samples = new_length
-                else: # arm_region
-                    with self.drag_track.lock:
-                        self.active_drag_item[0] = new_start
-                    
-            elif self.active_drag_mode == "resize_right":
-                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
-                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
-                delta_samples = mouse_sample - click_mouse_sample
-                
-                new_length = self.drag_length_samples + delta_samples
-                min_len = int(0.05 * sample_rate)
-                if target_type == "item":
-                    max_len = self.active_drag_item.audio_data.shape[1] - self.active_drag_item.offset_samples
-                    new_length = max(min_len, min(new_length, max_len))
-                    with self.drag_track.lock:
-                        self.active_drag_item.length_samples = new_length
-                else: # arm_region
-                    new_length = max(min_len, new_length)
-                    with self.drag_track.lock:
-                        self.active_drag_item[1] = self.drag_start_sample + new_length
-                    
-            self.update_geometry()
-        elif self.box_select_start is not None:
-            self.box_select_current = event.position()
-            
-            select_rect = QRectF(self.box_select_start, self.box_select_current).normalized()
-            
-            self.selected_items.clear()
-            self.selected_item = None
-            
-            # Select items intersecting the selection rectangle
-            for track_idx, track in enumerate(self.audio_engine.tracks):
-                y_top = track_idx * self.lane_height + 5
-                draw_h = self.lane_height - 10
-                
-                with track.lock:
-                    items_copy = list(track.items)
-                    
-                for item in items_copy:
-                    if item.audio_data is None:
-                        continue
-                        
-                    item_len = item.length_samples
-                    start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
-                    end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
-                    item_width = max(2, end_x - start_x)
-                    
-                    item_rect = QRectF(start_x, y_top, item_width, draw_h)
-                    if select_rect.intersects(item_rect):
-                        self.selected_items.add(item)
-                        # Set primary selected item for compatibility
-                        self.selected_item = item
-                        self.selected_target_type = "item"
-                        self.selected_track_for_item = track
-            self.update()
-        else:
-            # Hover cursor update
-            target, target_type, track, hover_type = self.get_hover_state(x, y)
-            if hover_type in ("resize_left", "resize_right"):
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
-            elif hover_type == "move":
-                self.setCursor(Qt.CursorShape.OpenHandCursor)
-            else:
-                self.setCursor(Qt.CursorShape.ArrowCursor)
-                
-    def mouseReleaseEvent(self, event):
-        if self.active_drag_item:
-            self.active_drag_item = None
-            self.active_drag_target_type = None
-            self.drag_track = None
-            self.active_drag_mode = None
-            self.setCursor(Qt.CursorShape.ArrowCursor)
-            if hasattr(self, 'main_window') and self.main_window:
-                self.main_window.mark_project_dirty()
-        elif self.box_select_start is not None:
-            self.box_select_start = None
-            self.box_select_current = None
-            self.update()
             
     def get_last_clip_end_sample(self):
         max_end = 0
@@ -653,8 +452,7 @@ class TimelineLanesWidget(QWidget):
                 item = AudioItem(start_sample, sample_rate, file_path=file_path)
                 if item.audio_data is not None:
                     # Copy WAV next to project later, or keep path
-                    with track.lock:
-                        track.items.append(item)
+                    self.audio_engine.add_item_to_track(track, item)
                     track.update_pedalboard(self.audio_engine.sample_rate)
                     self.update_geometry()
                     if hasattr(self, 'main_window') and self.main_window:
@@ -748,9 +546,8 @@ class TimelineLanesWidget(QWidget):
                         new_item.offset_samples = self.clipboard_clip["offset_samples"]
                         new_item.length_samples = self.clipboard_clip["length_samples"]
                         
-                        with target_track.lock:
-                            target_track.items.append(new_item)
-                            
+                        self.audio_engine.add_item_to_track(target_track, new_item)
+                        
                         self.selected_item = new_item
                         self.selected_track_for_item = target_track
                         self.update_geometry()
@@ -758,6 +555,22 @@ class TimelineLanesWidget(QWidget):
                         if hasattr(self, 'main_window') and self.main_window:
                             self.main_window.mark_project_dirty()
         else:
+            if event.key() == Qt.Key.Key_C:
+                toggled_any = False
+                for target in list(self.selected_items):
+                    if getattr(target, "takes", None):
+                        target.comp_expanded = not target.comp_expanded
+                        toggled_any = True
+                if self.selected_item and not toggled_any:
+                    if getattr(self.selected_item, "takes", None):
+                        self.selected_item.comp_expanded = not self.selected_item.comp_expanded
+                        toggled_any = True
+                if toggled_any:
+                    self.update_geometry()
+                    self.update()
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.mark_project_dirty()
+                    return
             super().keyPressEvent(event)
             
     def wheelEvent(self, event):
@@ -765,6 +578,768 @@ class TimelineLanesWidget(QWidget):
         zoom_factor = 1.15 if delta > 0 else 0.85
         self.zoomChanged.emit(zoom_factor)
         
+    def get_track_height(self, track):
+        base_h = self.lane_height
+        max_takes = 0
+        for item in track.items:
+            if getattr(item, "comp_expanded", False) and getattr(item, "takes", None):
+                max_takes = max(max_takes, len(item.takes))
+        if max_takes > 0:
+            sub_lane_h = 40
+            return base_h + max_takes * sub_lane_h
+        return base_h
+
+    def get_track_top(self, target_track):
+        y_curr = 0
+        for track in self.audio_engine.tracks:
+            if track == target_track:
+                return y_curr
+            y_curr += self.get_track_height(track)
+        return 0
+
+    def update_geometry(self):
+        # Calculate maximum track bounds
+        h = max(300, sum(self.get_track_height(t) for t in self.audio_engine.tracks))
+        
+        # Verify selected track is still valid
+        if self.selected_track_for_item and self.selected_track_for_item not in self.audio_engine.tracks:
+            self.selected_item = None
+            self.selected_track_for_item = None
+            
+        # Calculate maximum time bound
+        max_sec = 300.0  # Default 5 minutes
+        for track in self.audio_engine.tracks:
+            for item in track.items:
+                if item.audio_data is not None or getattr(item, "takes", None):
+                    item_end = (item.start_sample + item.length_samples) / item.sample_rate
+                    max_sec = max(max_sec, item_end + 15.0)  # Pad with 15s
+                
+        # Make sure the width expands to cover the current playhead + padding
+        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+        playhead_sec = self.audio_engine.playhead_samples / sr
+        max_sec = max(max_sec, playhead_sec + 30.0)
+        
+        w = int(max_sec * self.pixels_per_second)
+        self.resize(w, h)
+        
+        # Keep track cards heights synchronized
+        if hasattr(self, 'main_window') and self.main_window:
+            for card in self.main_window.track_cards:
+                h_target = self.get_track_height(card.track)
+                if card.height() != h_target:
+                    card.setFixedHeight(h_target)
+                    
+        self.update()
+        
+    def get_hover_state(self, x, y):
+        """
+        Returns (target, target_type, track, hover_type) where target_type is "item" or "arm_region"
+        and hover_type can be "resize_left", "resize_right", "move", or None.
+        """
+        target_track = None
+        y_curr = 0
+        for track in self.audio_engine.tracks:
+            h_track = self.get_track_height(track)
+            if y_curr <= y < y_curr + h_track:
+                target_track = track
+                break
+            y_curr += h_track
+            
+        if not target_track:
+            return None, None, None, None
+            
+        track = target_track
+        margin = 8
+        
+        with track.lock:
+            items_copy = list(track.items)
+            arm_regions_copy = list(getattr(track, "arm_regions", []))
+            
+        best_target = None
+        best_target_type = None
+        best_type = None
+        min_dist = float('inf')
+        
+        # 1. Check audio items first
+        for item in items_copy:
+            if item.audio_data is None and not getattr(item, "takes", None):
+                continue
+            item_start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+            item_end_x = int(((item.start_sample + item.length_samples) / item.sample_rate) * self.pixels_per_second)
+            
+            # If expanded, hover on sub-lanes shouldn't trigger move/resize of parent item
+            if getattr(item, "comp_expanded", False):
+                # Only allow move/resize if hover is on the main track lane (y < y_curr + self.lane_height)
+                if not (y_curr <= y < y_curr + self.lane_height):
+                    continue
+
+            if item_start_x - margin <= x <= item_end_x + margin:
+                dist_left = abs(x - item_start_x)
+                dist_right = abs(x - item_end_x)
+                
+                # Check near left edge
+                if dist_left <= margin and dist_left < min_dist:
+                    min_dist = dist_left
+                    best_target = item
+                    best_target_type = "item"
+                    best_type = "resize_left"
+                # Check near right edge
+                elif dist_right <= margin and dist_right < min_dist:
+                    min_dist = dist_right
+                    best_target = item
+                    best_target_type = "item"
+                    best_type = "resize_right"
+                # Inside item
+                elif item_start_x < x < item_end_x:
+                    if min_dist == float('inf'):
+                        best_target = item
+                        best_target_type = "item"
+                        best_type = "move"
+                        
+        # 2. Check Auto-Arm regions if no item matched
+        if best_target is None:
+            sr = self.audio_engine.sample_rate
+            for region in arm_regions_copy:
+                reg_start_x = int((region[0] / sr) * self.pixels_per_second)
+                reg_end_x = int((region[1] / sr) * self.pixels_per_second)
+                
+                if reg_start_x - margin <= x <= reg_end_x + margin:
+                    dist_left = abs(x - reg_start_x)
+                    dist_right = abs(x - reg_end_x)
+                    
+                    if dist_left <= margin and dist_left < min_dist:
+                        min_dist = dist_left
+                        best_target = region
+                        best_target_type = "arm_region"
+                        best_type = "resize_left"
+                    elif dist_right <= margin and dist_right < min_dist:
+                        min_dist = dist_right
+                        best_target = region
+                        best_target_type = "arm_region"
+                        best_type = "resize_right"
+                    elif reg_start_x < x < reg_end_x:
+                        if min_dist == float('inf'):
+                            best_target = region
+                            best_target_type = "arm_region"
+                            best_type = "move"
+                            
+        if best_target:
+            return best_target, best_target_type, track, best_type
+        return None, None, None, None
+
+    def mousePressEvent(self, event):
+        self.setFocus()  # Ensure widget gets focus so it can receive key events!
+        x = event.position().x()
+        y = event.position().y()
+        click_sample = int((x / self.pixels_per_second) * self.audio_engine.sample_rate)
+        
+        # 1. Check if clicked on a take sub-lane (for swipe comping or de-selection)
+        for track in self.audio_engine.tracks:
+            y_track_top = self.get_track_top(track)
+            for item in track.items:
+                if item.takes and item.comp_expanded:
+                    item_start = item.start_sample
+                    item_end = item.start_sample + item.length_samples
+                    if item_start <= click_sample <= item_end:
+                        # Check which sub-lane
+                        for take_idx in range(len(item.takes)):
+                            sub_y_top = y_track_top + self.lane_height + take_idx * 40
+                            if sub_y_top <= y <= sub_y_top + 40:
+                                if event.button() == Qt.MouseButton.RightButton:
+                                    # Start right-swipe comp de-selection!
+                                    self.right_swipe_item = item
+                                    self.right_swipe_take_idx = take_idx
+                                    self.right_swipe_start_sample = click_sample
+                                    self.drag_click_x = x
+                                    self.setCursor(Qt.CursorShape.ForbiddenCursor)
+                                    return
+                                else:
+                                    # Start swipe comping!
+                                    self.comp_swipe_item = item
+                                    self.comp_swipe_take_idx = take_idx
+                                    self.comp_swipe_start_sample = click_sample
+                                    self.drag_click_x = x
+                                    self.setCursor(Qt.CursorShape.IBeamCursor)
+                                    return
+                                    
+        # 2. Check if clicked on any expand/collapse "C" button of a Take Folder
+        for track in self.audio_engine.tracks:
+            y_track_top = self.get_track_top(track)
+            for item in track.items:
+                if item.takes:
+                    start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+                    # Coordinates of C button: start_x + 4 to start_x + 22, and anywhere vertically in the main track lane
+                    if (start_x + 4 <= x <= start_x + 22) and (y_track_top <= y <= y_track_top + self.lane_height):
+                        item.comp_expanded = not item.comp_expanded
+                        self.update_geometry()
+                        self.update()
+                        if hasattr(self, 'main_window') and self.main_window:
+                            self.main_window.mark_project_dirty()
+                        return
+                        
+        # 3. Check if right button to start timeline deletion drag (on main track lane)
+        if event.button() == Qt.MouseButton.RightButton:
+            self.right_drag_active = True
+            self.right_drag_start_x = x
+            self.right_drag_current_x = x
+            self.right_drag_start_sample = click_sample
+            
+            # Find which track we clicked on
+            y_curr = 0
+            self.right_drag_track = None
+            for track in self.audio_engine.tracks:
+                h_track = self.get_track_height(track)
+                if y_curr <= y < y_curr + h_track:
+                    self.right_drag_track = track
+                    break
+                y_curr += h_track
+            self.update()
+            return
+
+        target, target_type, track, hover_type = self.get_hover_state(x, y)
+        
+        # Emit track selection even if clicked on empty space
+        y_curr = 0
+        selected_idx = 0
+        for idx, t in enumerate(self.audio_engine.tracks):
+            h_track = self.get_track_height(t)
+            if y_curr <= y < y_curr + h_track:
+                selected_idx = idx
+                break
+            y_curr += h_track
+        if selected_idx < len(self.audio_engine.tracks):
+            self.trackSelected.emit(selected_idx)
+            
+        if target and track:
+            modifiers = event.modifiers()
+            if not (modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
+                self.selected_items.clear()
+            self.selected_items.add(target)
+            
+            self.selected_item = target
+            self.selected_target_type = target_type
+            self.selected_track_for_item = track
+            
+            self.active_drag_item = target
+            self.active_drag_target_type = target_type
+            self.drag_track = track
+            self.active_drag_mode = hover_type
+            
+            sample_rate = self.audio_engine.sample_rate
+            
+            # Store initial states
+            self.drag_click_x = x
+            if target_type == "item":
+                self.drag_start_sample = target.start_sample
+                self.drag_offset_samples = target.offset_samples
+                self.drag_length_samples = target.length_samples
+                self.drag_offset_samples_click = click_sample - target.start_sample
+            else: # arm_region
+                self.drag_start_sample = target[0]
+                self.drag_length_samples = target[1] - target[0]
+                self.drag_offset_samples_click = click_sample - target[0]
+            
+            if hover_type in ("resize_left", "resize_right"):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hover_type == "move":
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+        else:
+            self.selected_items.clear()
+            self.selected_item = None
+            self.selected_target_type = None
+            self.selected_track_for_item = None
+            self.active_drag_item = None
+            self.active_drag_target_type = None
+            self.active_drag_mode = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            
+            # Start box select tracking
+            self.box_select_start = event.position()
+            self.box_select_current = event.position()
+            
+            # Set playhead position on empty lane
+            time_seconds = max(0.0, x / self.pixels_per_second)
+            self.timeClicked.emit(time_seconds)
+            self.update()
+            
+    def apply_comp_range(self, item, start_s, end_s, take_idx):
+        new_ranges = []
+        for r_start, r_end, r_take in item.comp_ranges:
+            if r_end <= start_s or r_start >= end_s:
+                # No overlap
+                new_ranges.append([r_start, r_end, r_take])
+            else:
+                # Overlap exists
+                if r_start < start_s:
+                    new_ranges.append([r_start, start_s, r_take])
+                if r_end > end_s:
+                    new_ranges.append([end_s, r_end, r_take])
+        
+        new_ranges.append([start_s, end_s, take_idx])
+        new_ranges.sort(key=lambda r: r[0])
+        
+        # Merge adjacent ranges with same take_idx
+        merged = []
+        for r in new_ranges:
+            if not merged:
+                merged.append(r)
+            else:
+                prev = merged[-1]
+                if prev[2] == r[2] and prev[1] == r[0]:
+                    prev[1] = r[1]
+                else:
+                    merged.append(r)
+        item.comp_ranges = merged
+        item.update_cached_comp_data()
+
+    def remove_comp_range(self, item, start_s, end_s):
+        """Punches a hole in comp_ranges for [start_s, end_s], making it silent."""
+        new_ranges = []
+        for r_start, r_end, r_take in item.comp_ranges:
+            if r_end <= start_s or r_start >= end_s:
+                # No overlap
+                new_ranges.append([r_start, r_end, r_take])
+            else:
+                # Overlap exists, keep the non-overlapping parts
+                if r_start < start_s:
+                    new_ranges.append([r_start, start_s, r_take])
+                if r_end > end_s:
+                    new_ranges.append([end_s, r_end, r_take])
+        
+        new_ranges.sort(key=lambda r: r[0])
+        
+        # Merge adjacent ranges with same take_idx
+        merged = []
+        for r in new_ranges:
+            if not merged:
+                merged.append(r)
+            else:
+                prev = merged[-1]
+                if prev[2] == r[2] and prev[1] == r[0]:
+                    prev[1] = r[1]
+                else:
+                    merged.append(r)
+        item.comp_ranges = merged
+        item.update_cached_comp_data()
+
+    def mouseMoveEvent(self, event):
+        x = event.position().x()
+        y = event.position().y()
+        
+        # Handle right drag deletion
+        if getattr(self, "right_drag_active", False):
+            self.right_drag_current_x = x
+            self.update()
+            return
+            
+        # Handle active right swipe comp de-selection
+        if getattr(self, 'right_swipe_item', None) is not None:
+            current_s = int((x / self.pixels_per_second) * self.audio_engine.sample_rate)
+            item = self.right_swipe_item
+            start_s = min(self.right_swipe_start_sample, current_s)
+            end_s = max(self.right_swipe_start_sample, current_s)
+            
+            # Constrain to item boundaries
+            start_s = max(item.start_sample, start_s)
+            end_s = min(item.start_sample + item.length_samples, end_s)
+            
+            if start_s < end_s:
+                self.remove_comp_range(item, start_s, end_s)
+                self.update()
+            return
+            
+        # Handle active swipe comping
+        if hasattr(self, 'comp_swipe_item') and self.comp_swipe_item is not None:
+            current_s = int((x / self.pixels_per_second) * self.audio_engine.sample_rate)
+            item = self.comp_swipe_item
+            take_idx = self.comp_swipe_take_idx
+            start_s = min(self.comp_swipe_start_sample, current_s)
+            end_s = max(self.comp_swipe_start_sample, current_s)
+            
+            # Constrain to item boundaries
+            start_s = max(item.start_sample, start_s)
+            end_s = min(item.start_sample + item.length_samples, end_s)
+            
+            if start_s < end_s:
+                self.apply_comp_range(item, start_s, end_s, take_idx)
+                self.update()
+            return
+
+        if self.active_drag_item:
+            sample_rate = self.audio_engine.sample_rate
+            target_type = self.active_drag_target_type
+            
+            if self.active_drag_mode == "move":
+                new_start = int((x / self.pixels_per_second) * sample_rate) - self.drag_offset_samples_click
+                new_start = max(0, new_start)
+                if target_type == "item":
+                    with self.drag_track.lock:
+                        self.active_drag_item.start_sample = new_start
+                else: # arm_region
+                    with self.drag_track.lock:
+                        self.active_drag_item[0] = new_start
+                        self.active_drag_item[1] = new_start + self.drag_length_samples
+                    
+                # Shift clip/region between tracks when dragging vertically
+                target_track_idx = 0
+                y_curr = 0
+                for idx, t in enumerate(self.audio_engine.tracks):
+                    h_track = self.get_track_height(t)
+                    if y_curr <= y < y_curr + h_track:
+                        target_track_idx = idx
+                        break
+                    y_curr += h_track
+                target_track_idx = max(0, min(len(self.audio_engine.tracks) - 1, target_track_idx))
+                target_track = self.audio_engine.tracks[target_track_idx]
+                if target_track != self.drag_track:
+                    if target_type == "item":
+                        with self.drag_track.lock:
+                            if self.active_drag_item in self.drag_track.items:
+                                self.drag_track.items.remove(self.active_drag_item)
+                        self.audio_engine.add_item_to_track(target_track, self.active_drag_item)
+                    else: # arm_region
+                        with self.drag_track.lock:
+                            if self.active_drag_item in getattr(self.drag_track, "arm_regions", []):
+                                self.drag_track.arm_regions.remove(self.active_drag_item)
+                        with target_track.lock:
+                            if not hasattr(target_track, "arm_regions"):
+                                target_track.arm_regions = []
+                            target_track.arm_regions.append(self.active_drag_item)
+                    self.drag_track = target_track
+                    self.selected_track_for_item = target_track
+            
+            elif self.active_drag_mode == "resize_left":
+                timeline_end = self.drag_start_sample + self.drag_length_samples
+                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                delta_samples = mouse_sample - click_mouse_sample
+                
+                new_start = self.drag_start_sample + delta_samples
+                new_start = max(0, new_start)
+                
+                # Minimum length of 50ms
+                min_len = int(0.05 * sample_rate)
+                max_allowed_start = timeline_end - min_len
+                new_start = min(new_start, max_allowed_start)
+                
+                if target_type == "item":
+                    actual_delta = new_start - self.drag_start_sample
+                    new_offset = self.drag_offset_samples + actual_delta
+                    
+                    # Check bounds for new_offset
+                    max_offset = (self.active_drag_item.audio_data.shape[1] if self.active_drag_item.audio_data is not None else self.active_drag_item.length_samples) - min_len
+                    new_offset = max(0, min(new_offset, max_offset))
+                    
+                    actual_delta = new_offset - self.drag_offset_samples
+                    new_start = self.drag_start_sample + actual_delta
+                    new_length = timeline_end - new_start
+                    
+                    with self.drag_track.lock:
+                        self.active_drag_item.start_sample = new_start
+                        self.active_drag_item.offset_samples = new_offset
+                        self.active_drag_item.length_samples = new_length
+                else: # arm_region
+                    with self.drag_track.lock:
+                        self.active_drag_item[0] = new_start
+                    
+            elif self.active_drag_mode == "resize_right":
+                mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                delta_samples = mouse_sample - click_mouse_sample
+                
+                new_length = self.drag_length_samples + delta_samples
+                min_len = int(0.05 * sample_rate)
+                if target_type == "item":
+                    max_len = (self.active_drag_item.audio_data.shape[1] if self.active_drag_item.audio_data is not None else self.active_drag_item.length_samples) - self.active_drag_item.offset_samples
+                    new_length = max(min_len, min(new_length, max_len))
+                    with self.drag_track.lock:
+                        self.active_drag_item.length_samples = new_length
+                else: # arm_region
+                    new_length = max(min_len, new_length)
+                    with self.drag_track.lock:
+                        self.active_drag_item[1] = self.drag_start_sample + new_length
+                    
+            self.update_geometry()
+        elif self.box_select_start is not None:
+            self.box_select_current = event.position()
+            
+            select_rect = QRectF(self.box_select_start, self.box_select_current).normalized()
+            
+            self.selected_items.clear()
+            self.selected_item = None
+            
+            # Select items intersecting the selection rectangle
+            y_curr = 0
+            for track_idx, track in enumerate(self.audio_engine.tracks):
+                h_track = self.get_track_height(track)
+                y_top = y_curr + 5
+                draw_h = self.lane_height - 10
+                
+                with track.lock:
+                    items_copy = list(track.items)
+                    
+                for item in items_copy:
+                    if item.audio_data is None and not getattr(item, "takes", None):
+                        continue
+                        
+                    item_len = item.length_samples
+                    start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
+                    end_x = int(((item.start_sample + item_len) / item.sample_rate) * self.pixels_per_second)
+                    item_width = max(2, end_x - start_x)
+                    
+                    item_rect = QRectF(start_x, y_top, item_width, draw_h)
+                    if select_rect.intersects(item_rect):
+                        self.selected_items.add(item)
+                        # Set primary selected item for compatibility
+                        self.selected_item = item
+                        self.selected_target_type = "item"
+                        self.selected_track_for_item = track
+                y_curr += h_track
+            self.update()
+        else:
+            # Hover cursor update
+            target, target_type, track, hover_type = self.get_hover_state(x, y)
+            if hover_type in ("resize_left", "resize_right"):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hover_type == "move":
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                
+    def mouseReleaseEvent(self, event):
+        if getattr(self, "right_drag_active", False):
+            self.right_drag_active = False
+            track = getattr(self, "right_drag_track", None)
+            if track:
+                sample_rate = self.audio_engine.sample_rate
+                start_x = min(self.right_drag_start_x, self.right_drag_current_x)
+                end_x = max(self.right_drag_start_x, self.right_drag_current_x)
+                start_sample = int((start_x / self.pixels_per_second) * sample_rate)
+                end_sample = int((end_x / self.pixels_per_second) * sample_rate)
+                if start_sample < end_sample:
+                    self.remove_portions_from_track(track, start_sample, end_sample)
+            self.right_drag_track = None
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
+            self.update()
+            return
+
+        if getattr(self, 'right_swipe_item', None) is not None:
+            self.right_swipe_item.update_cached_comp_data()
+            self.right_swipe_item = None
+            self.right_swipe_take_idx = None
+            self.right_swipe_start_sample = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
+            self.update()
+            return
+
+        if hasattr(self, 'comp_swipe_item') and self.comp_swipe_item is not None:
+            # If the drag span is tiny, treat it as a click to select that take entirely
+            drag_dist = abs(event.position().x() - self.drag_click_x)
+            if drag_dist < 3:
+                self.comp_swipe_item.comp_ranges.clear()
+                self.comp_swipe_item.active_take_index = self.comp_swipe_take_idx
+            
+            self.comp_swipe_item.update_cached_comp_data()
+            self.comp_swipe_item = None
+            self.comp_swipe_take_idx = None
+            self.comp_swipe_start_sample = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
+            self.update()
+            return
+
+        if self.active_drag_item:
+            self.active_drag_item = None
+            self.active_drag_target_type = None
+            self.drag_track = None
+            self.active_drag_mode = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
+        elif self.box_select_start is not None:
+            self.box_select_start = None
+            self.box_select_current = None
+            self.update()
+
+    def remove_portions_from_track(self, track, start_sample, end_sample):
+        """
+        Removes portions of audio clips on a track within [start_sample, end_sample].
+        Splits, trims, or deletes clips that overlap the range.
+        """
+        with track.lock:
+            original_items = list(track.items)
+            new_items = []
+            
+            for item in original_items:
+                item_start = item.start_sample
+                item_end = item.start_sample + item.length_samples
+                
+                # Case 1: Clip is completely outside the delete range
+                if item_end <= start_sample or item_start >= end_sample:
+                    new_items.append(item)
+                    
+                # Case 2: Clip is completely inside the delete range
+                elif item_start >= start_sample and item_end <= end_sample:
+                    # Deleted completely
+                    continue
+                    
+                # Case 3: Delete range splits the clip in two
+                elif item_start < start_sample and item_end > end_sample:
+                    # Left split
+                    left_len = start_sample - item_start
+                    left_item = self.clone_audio_item(item)
+                    left_item.length_samples = left_len
+                    left_item.update_cached_comp_data()
+                    new_items.append(left_item)
+                    
+                    # Right split
+                    right_start = end_sample
+                    right_len = item_end - end_sample
+                    right_offset = item.offset_samples + (end_sample - item_start)
+                    
+                    right_item = self.clone_audio_item(item)
+                    right_item.start_sample = right_start
+                    right_item.offset_samples = right_offset
+                    right_item.length_samples = right_len
+                    right_item.update_cached_comp_data()
+                    new_items.append(right_item)
+                    
+                # Case 4: Delete range overlaps the left side of the clip
+                elif item_start >= start_sample and item_start < end_sample < item_end:
+                    shift = end_sample - item_start
+                    item.start_sample = end_sample
+                    item.offset_samples += shift
+                    item.length_samples -= shift
+                    item.update_cached_comp_data()
+                    new_items.append(item)
+                    
+                # Case 5: Delete range overlaps the right side of the clip
+                elif item_start < start_sample < item_end <= end_sample:
+                    item.length_samples = start_sample - item_start
+                    item.update_cached_comp_data()
+                    new_items.append(item)
+            
+            track.items = new_items
+
+    def clone_audio_item(self, item):
+        from audio_engine import AudioItem
+        new_item = AudioItem(
+            start_sample=item.start_sample,
+            sample_rate=item.sample_rate,
+            file_path=item.file_path,
+            audio_data=item.audio_data
+        )
+        new_item.offset_samples = item.offset_samples
+        new_item.length_samples = item.length_samples
+        new_item.takes = [self.clone_audio_item(t) for t in item.takes] if item.takes else []
+        new_item.active_take_index = item.active_take_index
+        new_item.comp_ranges = [r.copy() for r in item.comp_ranges] if item.comp_ranges else []
+        new_item.comp_expanded = item.comp_expanded
+        if hasattr(item, "_cached_comp_data"):
+            new_item._cached_comp_data = item._cached_comp_data
+        return new_item
+            
+    def get_last_clip_end_sample(self):
+        max_end = 0
+        for track in self.audio_engine.tracks:
+            with track.lock:
+                for item in track.items:
+                    end_sample = item.start_sample + item.length_samples
+                    if end_sample > max_end:
+                        max_end = end_sample
+        return max_end
+
+    def setup_loop_region(self):
+        if self.audio_engine.loop_enabled:
+            self.audio_engine.loop_enabled = False
+        else:
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            last_clip_end = self.get_last_clip_end_sample()
+            self.audio_engine.loop_start = 0
+            if last_clip_end == 0:
+                self.audio_engine.loop_end = int(5.0 * sr)
+            else:
+                self.audio_engine.loop_end = int(last_clip_end)
+            self.audio_engine.loop_enabled = True
+        self.update()
+        if hasattr(self, 'ruler') and self.ruler:
+            self.ruler.update()
+
+    def mouseDoubleClickEvent(self, event):
+        x = event.position().x()
+        y = event.position().y()
+        target, target_type, track, hover_type = self.get_hover_state(x, y)
+        is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        
+        # Double-click Take Folder to expand/collapse
+        if target and target_type == "item" and getattr(target, "takes", None):
+            target.comp_expanded = not target.comp_expanded
+            self.update_geometry()
+            self.update()
+            if hasattr(self, 'main_window') and self.main_window:
+                self.main_window.mark_project_dirty()
+            return
+
+        if target is None and not is_shift:
+            self.setup_loop_region()
+            return
+            
+        # Double-click empty track lane space to import audio or create Auto-Arm zone
+        y_curr = 0
+        track_idx = 0
+        for idx, t in enumerate(self.audio_engine.tracks):
+            h_track = self.get_track_height(t)
+            if y_curr <= y < y_curr + h_track:
+                track_idx = idx
+                break
+            y_curr += h_track
+            
+        if track_idx < len(self.audio_engine.tracks):
+            track = self.audio_engine.tracks[track_idx]
+            sample_rate = self.audio_engine.sample_rate
+            start_sample = int((x / self.pixels_per_second) * sample_rate)
+            
+            # If Shift is held down, create an Auto-Arm Zone!
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                # Default 5 seconds
+                end_sample = start_sample + int(5.0 * sample_rate)
+                if not hasattr(track, "arm_regions"):
+                    track.arm_regions = []
+                with track.lock:
+                    region = [start_sample, end_sample]
+                    track.arm_regions.append(region)
+                self.selected_item = region
+                self.selected_target_type = "arm_region"
+                self.selected_track_for_item = track
+                self.update_geometry()
+                self.update()
+                if hasattr(self, 'main_window') and self.main_window:
+                    self.main_window.mark_project_dirty()
+                return
+            
+            # Select file dialog
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Import Audio File",
+                "",
+                "Audio Files (*.wav *.mp3 *.flac *.ogg *.m4a *.wma *.aiff *.aif);;All Files (*)"
+            )
+            if file_path:
+                # Create and add item
+                item = AudioItem(start_sample, sample_rate, file_path=file_path)
+                if item.audio_data is not None:
+                    # Copy WAV next to project later, or keep path
+                    self.audio_engine.add_item_to_track(track, item)
+                    track.update_pedalboard(self.audio_engine.sample_rate)
+                    self.update_geometry()
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.mark_project_dirty()
+                        
     def paintEvent(self, event):
         painter = QPainter(self)
         try:
@@ -775,20 +1350,24 @@ class TimelineLanesWidget(QWidget):
             
             # 1. Alternate Track Lane backgrounds
             tracks = self.audio_engine.tracks
-            for idx in range(len(tracks)):
-                y_pos = idx * self.lane_height
+            y_curr = 0
+            for idx, track in enumerate(tracks):
+                h_track = self.get_track_height(track)
                 bg_color = QColor("#0b0b0c") if idx % 2 == 0 else QColor("#050505")
-                painter.fillRect(0, y_pos, w, self.lane_height, bg_color)
+                painter.fillRect(0, y_curr, w, h_track, bg_color)
                 
                 # Draw lane bottom border
                 painter.setPen(QPen(QColor("#222225"), 1))
-                painter.drawLine(0, y_pos + self.lane_height - 1, w, y_pos + self.lane_height - 1)
+                painter.drawLine(0, y_curr + h_track - 1, w, y_curr + h_track - 1)
+                y_curr += h_track
                 
             # 2. Draw Items & Waveforms
+            y_pos = 0
             for t_idx, track in enumerate(tracks):
-                y_center = t_idx * self.lane_height + int(self.lane_height / 2)
-                y_top = t_idx * self.lane_height + 5
+                h_track = self.get_track_height(track)
+                y_top = y_pos + 5
                 draw_h = self.lane_height - 10
+                y_center = y_pos + int(self.lane_height / 2)
                 
                 # Draw Auto-Arm Zones for this track first (as a background overlay)
                 with track.lock:
@@ -863,7 +1442,7 @@ class TimelineLanesWidget(QWidget):
                     items_to_draw.append(live_item)
                     
                 for item in items_to_draw:
-                    if item.audio_data is None:
+                    if item.audio_data is None and not getattr(item, "takes", None):
                         continue
                         
                     is_live = (item is live_item)
@@ -893,52 +1472,161 @@ class TimelineLanesWidget(QWidget):
                     if is_live:
                         painter.setPen(QColor("#ff0033"))
                         name_str = "Recording Live..."
+                    elif getattr(item, "takes", None):
+                        painter.setPen(QColor("#ffffff"))
+                        name_str = f"Take Folder ({len(item.takes)} Takes)"
                     else:
                         painter.setPen(QColor("#88888c"))
                         name_str = os.path.basename(item.file_path) if item.file_path else "Recorded Clip"
                     
                     # Clip text to container width
                     metrics = painter.fontMetrics()
-                    elided_str = metrics.elidedText(name_str, Qt.TextElideMode.ElideRight, int(item_width - 10))
-                    painter.drawText(start_x + 5, y_top + 12, elided_str)
+                    text_x = start_x + (26 if getattr(item, "takes", None) else 5)
+                    elided_str = metrics.elidedText(name_str, Qt.TextElideMode.ElideRight, int(item_width - (text_x - start_x) - 5))
+                    painter.drawText(text_x, y_top + 12, elided_str)
                     
+                    # Draw Expand/Collapse Button [C]
+                    if getattr(item, "takes", None):
+                        btn_rect = QRectF(start_x + 4, y_top + 4, 18, 18)
+                        painter.setBrush(QBrush(QColor("#ffffff") if item.comp_expanded else QColor("#222225")))
+                        painter.setPen(QPen(QColor("#000000") if item.comp_expanded else QColor("#ffffff"), 1.0))
+                        painter.drawRoundedRect(btn_rect, 2, 2)
+                        
+                        painter.setPen(QColor("#000000") if item.comp_expanded else QColor("#ffffff"))
+                        painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, "C")
+                    
+                    # Get waveform channel data
+                    ch_data = None
+                    if getattr(item, "takes", None):
+                        if not hasattr(item, "_cached_comp_data") or item._cached_comp_data is None:
+                            item.update_cached_comp_data()
+                        if item._cached_comp_data is not None:
+                            ch_data = item._cached_comp_data[0]
+                    elif item.audio_data is not None:
+                        ch_data = item.audio_data[0]
+                        
                     # Draw Waveform Outline
-                    if is_live:
-                        painter.setPen(QPen(QColor("#ff0033"), 1.0))
-                    else:
-                        painter.setPen(QPen(QColor("#e2e2e5"), 1.0))
-                    
-                    # Sub-sample waveform for speed
-                    half_h = int(draw_h / 2.5)
-                    # Compute min-max for each pixel column
-                    # Map audio_data channel 0
-                    ch_data = item.audio_data[0]
-                    
-                    limit = min(item.offset_samples + item.length_samples, ch_data.shape[0])
-                    samples_per_px = item.length_samples / max(1, item_width)
-                    
-                    for px in range(item_width):
-                        px_start = item.offset_samples + int(px * samples_per_px)
-                        px_end = item.offset_samples + int((px + 1) * samples_per_px)
-                        px_start = min(px_start, limit)
-                        px_end = min(px_end, limit)
+                    if ch_data is not None:
+                        if is_live:
+                            painter.setPen(QPen(QColor("#ff0033"), 1.0))
+                        else:
+                            painter.setPen(QPen(QColor("#e2e2e5"), 1.0))
                         
-                        if px_start >= limit:
-                            break
-                        chunk = ch_data[px_start:px_end]
-                        if len(chunk) == 0:
-                            continue
+                        # Sub-sample waveform for speed
+                        half_h = int(draw_h / 2.5)
+                        limit = min(item.offset_samples + item.length_samples, ch_data.shape[0])
+                        samples_per_px = item.length_samples / max(1, item_width)
+                        
+                        for px in range(item_width):
+                            px_start = item.offset_samples + int(px * samples_per_px)
+                            px_end = item.offset_samples + int((px + 1) * samples_per_px)
+                            px_start = min(px_start, limit)
+                            px_end = min(px_end, limit)
                             
-                        ch_min = np.min(chunk)
-                        ch_max = np.max(chunk)
-                        
-                        line_x = start_x + px
-                        line_y_top = y_center + int(ch_min * half_h)
-                        line_y_bottom = y_center + int(ch_max * half_h)
-                        if line_y_top == line_y_bottom:
-                            line_y_bottom += 1
-                        painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
-                        
+                            if px_start >= limit:
+                                break
+                            chunk = ch_data[px_start:px_end]
+                            if len(chunk) == 0:
+                                continue
+                                
+                            ch_min = np.min(chunk)
+                            ch_max = np.max(chunk)
+                            
+                            line_x = start_x + px
+                            line_y_top = y_center + int(ch_min * half_h)
+                            line_y_bottom = y_center + int(ch_max * half_h)
+                            if line_y_top == line_y_bottom:
+                                line_y_bottom += 1
+                            painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
+                            
+                    # Draw take sub-lanes if expanded
+                    if getattr(item, "comp_expanded", False) and getattr(item, "takes", None):
+                        for take_idx, take in enumerate(item.takes):
+                            sub_y_top = y_pos + self.lane_height + take_idx * 40
+                            sub_draw_h = 36
+                            sub_y_center = sub_y_top + 18
+                            
+                            sub_start_x = int((take.start_sample / take.sample_rate) * self.pixels_per_second)
+                            sub_end_x = int(((take.start_sample + take.length_samples) / take.sample_rate) * self.pixels_per_second)
+                            sub_width = max(2, sub_end_x - sub_start_x)
+                            
+                            # Draw sub-lane block background
+                            sub_rect = QRectF(sub_start_x, sub_y_top, sub_width, sub_draw_h)
+                            painter.setBrush(QBrush(QColor("#111112")))
+                            painter.setPen(QPen(QColor("#222225"), 1.0))
+                            painter.drawRoundedRect(sub_rect, 2, 2)
+                            
+                            # Draw take name
+                            font_sub = QFont("Consolas", 8)
+                            painter.setFont(font_sub)
+                            painter.setPen(QColor("#88888c"))
+                            take_name = f"Take {take_idx + 1}"
+                            if take.file_path:
+                                take_name += f" ({os.path.basename(take.file_path)})"
+                            elided_take_name = painter.fontMetrics().elidedText(take_name, Qt.TextElideMode.ElideRight, int(sub_width - 10))
+                            painter.drawText(sub_start_x + 5, sub_y_top + 10, elided_take_name)
+                            
+                            # Draw take waveform
+                            if take.audio_data is not None:
+                                take_ch_data = take.audio_data[0]
+                                take_limit = min(take.offset_samples + take.length_samples, take_ch_data.shape[0])
+                                take_samples_per_px = take.length_samples / max(1, sub_width)
+                                if not item.comp_ranges:
+                                    is_active_const = (item.active_take_index == take_idx)
+                                    has_ranges = False
+                                else:
+                                    has_ranges = True
+                                    ranges_list = item.comp_ranges
+                                    current_range_idx = 0
+                                    num_ranges = len(ranges_list)
+                                    
+                                for px in range(sub_width):
+                                    px_start = take.offset_samples + int(px * take_samples_per_px)
+                                    px_end = take.offset_samples + int((px + 1) * take_samples_per_px)
+                                    px_start = min(px_start, take_limit)
+                                    px_end = min(px_end, take_limit)
+                                    
+                                    if px_start >= take_limit:
+                                        break
+                                    chunk = take_ch_data[px_start:px_end]
+                                    if len(chunk) == 0:
+                                        continue
+                                        
+                                    ch_min = np.min(chunk)
+                                    ch_max = np.max(chunk)
+                                    
+                                    # Check if active
+                                    if not has_ranges:
+                                        is_active = is_active_const
+                                    else:
+                                        abs_sample = take.start_sample + px_start - take.offset_samples
+                                        is_active = False
+                                        while current_range_idx < num_ranges and ranges_list[current_range_idx][1] <= abs_sample:
+                                            current_range_idx += 1
+                                        if current_range_idx < num_ranges:
+                                            r_start, r_end, r_take = ranges_list[current_range_idx]
+                                            if r_start <= abs_sample < r_end:
+                                                is_active = (r_take == take_idx)
+                                                
+                                    if is_active:
+                                        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+                                    else:
+                                        painter.setPen(QPen(QColor("#444448"), 1.0))
+                                        
+                                    line_x = sub_start_x + px
+                                    line_y_top = sub_y_center + int(ch_min * (sub_draw_h / 2.5))
+                                    line_y_bottom = sub_y_center + int(ch_max * (sub_draw_h / 2.5))
+                                    if line_y_top == line_y_bottom:
+                                        line_y_bottom += 1
+                                    painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
+                                    
+                                    if is_active:
+                                        # Draw a highlighted subtle overlay line
+                                        painter.setPen(QPen(QColor(255, 255, 255, 20), 1.0))
+                                        painter.drawLine(line_x, sub_y_top + 1, line_x, sub_y_top + sub_draw_h - 1)
+                                        
+                y_pos += h_track
+                
             # 2.5 Draw Loop Region Shading
             sr = self.audio_engine.sample_rate if self.audio_engine else 44100
             if self.audio_engine.loop_enabled and self.audio_engine.loop_end > self.audio_engine.loop_start:
@@ -965,6 +1653,18 @@ class TimelineLanesWidget(QWidget):
                 # Draw white dashed border
                 painter.setPen(QPen(QColor("#ffffff"), 1.0, Qt.PenStyle.DashLine))
                 painter.drawRect(select_rect)
+                
+            # 5. Draw Right Drag Deletion Region
+            if getattr(self, "right_drag_active", False) and getattr(self, "right_drag_track", None) is not None:
+                track = self.right_drag_track
+                y_track_top = self.get_track_top(track)
+                h_track = self.get_track_height(track)
+                start_x = min(self.right_drag_start_x, self.right_drag_current_x)
+                end_x = max(self.right_drag_start_x, self.right_drag_current_x)
+                
+                painter.fillRect(int(start_x), int(y_track_top), int(end_x - start_x), int(h_track), QColor(255, 0, 0, 45))
+                painter.setPen(QPen(QColor(255, 0, 0, 180), 1.0, Qt.PenStyle.DashLine))
+                painter.drawRect(int(start_x), int(y_track_top), int(end_x - start_x), int(h_track))
         finally:
             painter.end()
 
@@ -983,7 +1683,16 @@ class TimelineLanesWidget(QWidget):
     def import_files_at_pos(self, x, y, urls):
         sample_rate = self.audio_engine.sample_rate
         start_sample = max(0, int((x / self.pixels_per_second) * sample_rate))
-        track_idx = max(0, int(y // self.lane_height))
+        
+        # Calculate track_idx with variable heights
+        y_curr = 0
+        track_idx = 0
+        for idx, t in enumerate(self.audio_engine.tracks):
+            h_track = self.get_track_height(t)
+            if y_curr <= y < y_curr + h_track:
+                track_idx = idx
+                break
+            y_curr += h_track
         
         audio_extensions = ('.wav', '.mp3', '.flac', '.ogg', '.m4a', '.wma', '.aiff', '.aif')
         audio_files = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith(audio_extensions)]
@@ -1004,8 +1713,7 @@ class TimelineLanesWidget(QWidget):
                 item = AudioItem(start_sample, sample_rate, file_path=file_path)
                 if item.audio_data is not None:
                     # Copy WAV next to project later, or keep path
-                    with track.lock:
-                        track.items.append(item)
+                    self.audio_engine.add_item_to_track(track, item)
                     track.update_pedalboard(self.audio_engine.sample_rate)
                     
         self.update_geometry()

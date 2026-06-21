@@ -442,7 +442,7 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.tracks_scroll = QScrollArea()
         self.tracks_scroll.setObjectName("TracksScrollArea")
         self.tracks_scroll.setWidgetResizable(True)
-        self.tracks_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tracks_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.tracks_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tracks_scroll.setFrameShape(QFrame.Shape.NoFrame)
         
@@ -693,6 +693,36 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             }
             #TracksScrollArea {
                 background: transparent;
+            }
+            #TracksScrollArea QScrollBar:horizontal {
+                height: 12px;
+                background: #000000;
+                border: none;
+            }
+            #TracksScrollArea QScrollBar::handle:horizontal {
+                background: transparent;
+                border: none;
+            }
+            #TracksScrollArea QScrollBar::add-line:horizontal, #TracksScrollArea QScrollBar::sub-line:horizontal {
+                width: 0px;
+                background: none;
+            }
+            QScrollBar:horizontal {
+                background: #000000;
+                height: 12px;
+                border: none;
+            }
+            QScrollBar::handle:horizontal {
+                background: #222225;
+                min-width: 20px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:horizontal:hover {
+                background: #444448;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+                background: none;
             }
             #TracksContainer {
                 background: transparent;

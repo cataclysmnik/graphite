@@ -203,11 +203,133 @@ class AudioItem:
         self.audio_data = audio_data  # 2D numpy array: shape (channels, samples)
         self.offset_samples = 0
         self.length_samples = 0
+        self.takes = []                     # list of child AudioItem objects
+        self.active_take_index = 0          # fallback active take index
+        self.comp_ranges = []               # list of [start_sample, end_sample, take_index]
+        self.comp_expanded = False          # UI expansion state
         
         if file_path and os.path.exists(file_path):
             self.load_from_wav(file_path)
         elif audio_data is not None:
             self.length_samples = audio_data.shape[1]
+
+    def get_audio_data_slice(self, start_sample, length_samples):
+        """
+        Returns a 2D numpy array of shape (2, length_samples) containing
+        the audio data slice. Applies crossfades at take transition boundaries if comping.
+        """
+        out_buf = np.zeros((2, length_samples), dtype=np.float32)
+        if not self.takes:
+            if self.audio_data is None:
+                return out_buf
+            # Standard single clip playback
+            read_offset = max(0, start_sample - self.start_sample) + self.offset_samples
+            item_ch = self.audio_data.shape[0]
+            slice_len = min(length_samples, self.audio_data.shape[1] - read_offset)
+            if slice_len > 0 and read_offset < self.audio_data.shape[1]:
+                for ch in range(2):
+                    read_ch = ch if ch < item_ch else 0
+                    out_buf[ch, :slice_len] = self.audio_data[read_ch, read_offset : read_offset + slice_len]
+            return out_buf
+            
+        # Comp folder item playback
+        ranges = self.comp_ranges
+        if not ranges:
+            ranges = [[self.start_sample, self.start_sample + self.length_samples, self.active_take_index]]
+            
+        fade_len = int(0.005 * self.sample_rate) # 5ms
+        window_end = start_sample + length_samples
+        
+        # Slices from active takes
+        for r_start, r_end, take_idx in ranges:
+            overlap_start = max(start_sample, r_start)
+            overlap_end = min(window_end, r_end)
+            if overlap_start < overlap_end:
+                write_offset = overlap_start - start_sample
+                slice_len = overlap_end - overlap_start
+                
+                take_item = self.takes[take_idx] if take_idx < len(self.takes) else None
+                if take_item and take_item.audio_data is not None:
+                    read_offset = max(0, overlap_start - take_item.start_sample) + take_item.offset_samples
+                    take_ch = take_item.audio_data.shape[0]
+                    actual_len = min(slice_len, take_item.audio_data.shape[1] - read_offset)
+                    if actual_len > 0 and read_offset < take_item.audio_data.shape[1]:
+                        for ch in range(2):
+                            read_ch = ch if ch < take_ch else 0
+                            out_buf[ch, write_offset : write_offset + actual_len] = take_item.audio_data[read_ch, read_offset : read_offset + actual_len]
+                            
+        # Apply crossfade at transition boundaries
+        for i in range(len(ranges) - 1):
+            r1_start, r1_end, t1_idx = ranges[i]
+            r2_start, r2_end, t2_idx = ranges[i+1]
+            if r1_end == r2_start and t1_idx != t2_idx:
+                transition_sample = r1_end
+                if start_sample - fade_len < transition_sample < window_end + fade_len:
+                    fade_start = transition_sample - fade_len // 2
+                    fade_end = transition_sample + fade_len // 2
+                    overlap_start = max(start_sample, fade_start)
+                    overlap_end = min(window_end, fade_end)
+                    if overlap_start < overlap_end:
+                        take1 = self.takes[t1_idx] if t1_idx < len(self.takes) else None
+                        take2 = self.takes[t2_idx] if t2_idx < len(self.takes) else None
+                        if take1 and take1.audio_data is not None and take2 and take2.audio_data is not None:
+                            s_arr = np.arange(overlap_start, overlap_end, dtype=np.int32)
+                            out_indices = s_arr - start_sample
+                            t = (s_arr - fade_start) / fade_len
+                            t = np.clip(t, 0.0, 1.0)
+                            w_in = t
+                            w_out = 1.0 - t
+                            
+                            offset1 = s_arr - take1.start_sample + take1.offset_samples
+                            offset2 = s_arr - take2.start_sample + take2.offset_samples
+                            
+                            t1_len = take1.audio_data.shape[1]
+                            t2_len = take2.audio_data.shape[1]
+                            
+                            valid_mask = (offset1 >= 0) & (offset1 < t1_len) & (offset2 >= 0) & (offset2 < t2_len)
+                            if np.any(valid_mask):
+                                out_idx_v = out_indices[valid_mask]
+                                offset1_v = offset1[valid_mask]
+                                offset2_v = offset2[valid_mask]
+                                w_in_v = w_in[valid_mask]
+                                w_out_v = w_out[valid_mask]
+                                
+                                for ch in range(2):
+                                    ch1 = ch if ch < take1.audio_data.shape[0] else 0
+                                    ch2 = ch if ch < take2.audio_data.shape[0] else 0
+                                    
+                                    val1 = take1.audio_data[ch1, offset1_v]
+                                    val2 = take2.audio_data[ch2, offset2_v]
+                                    out_buf[ch, out_idx_v] = (val1 * w_out_v) + (val2 * w_in_v)
+                                        
+        return out_buf
+
+    def update_cached_comp_data(self):
+        if not self.takes:
+            self._cached_comp_data = None
+            return
+        self._cached_comp_data = self.get_audio_data_slice(self.start_sample, self.length_samples)
+
+    def add_take(self, new_take_item):
+        """Adds a take to this take folder and expands boundaries."""
+        if not self.takes:
+            # Convert self to first child take
+            take1 = AudioItem(self.start_sample, self.sample_rate, file_path=self.file_path, audio_data=self.audio_data)
+            take1.offset_samples = self.offset_samples
+            take1.length_samples = self.length_samples
+            self.takes.append(take1)
+            self.audio_data = None
+            self.file_path = None
+            
+        self.takes.append(new_take_item)
+        
+        min_start = min(t.start_sample for t in self.takes)
+        max_end = max(t.start_sample + t.length_samples for t in self.takes)
+        
+        self.start_sample = min_start
+        self.length_samples = max_end - min_start
+        self.active_take_index = len(self.takes) - 1
+        self.update_cached_comp_data()
             
     def load_from_wav(self, file_path):
         # Primary: try soundfile (supports 24-bit, 32-bit float, etc.)
@@ -803,8 +925,7 @@ class AudioEngine:
                     item = AudioItem(start_sample, sr, file_path=file_path, audio_data=audio_2d)
                     try:
                         item.save_to_wav(file_path)
-                        with track.lock:
-                            track.items.append(item)
+                        self.add_item_to_track(track, item)
                     except Exception as e:
                         print(f"Failed to save recorded WAV: {e}")
                 else:
@@ -827,12 +948,26 @@ class AudioEngine:
                                 item = AudioItem(overlap_start, sr, file_path=file_path, audio_data=audio_2d)
                                 try:
                                     item.save_to_wav(file_path)
-                                    with track.lock:
-                                        track.items.append(item)
+                                    self.add_item_to_track(track, item)
                                 except Exception as e:
                                     print(f"Failed to save sliced recorded WAV: {e}")
             except Exception as e:
                 print(f"Error processing recorded data for Track {track.name}: {e}")
+
+    def add_item_to_track(self, track, new_item):
+        """Appends an item to a track, merging into a Take Folder if overlapping."""
+        with track.lock:
+            overlap_item = None
+            for item in track.items:
+                item_end = item.start_sample + item.length_samples
+                new_end = new_item.start_sample + new_item.length_samples
+                if not (new_item.start_sample >= item_end or new_end <= item.start_sample):
+                    overlap_item = item
+                    break
+            if overlap_item is not None:
+                overlap_item.add_take(new_item)
+            else:
+                track.items.append(new_item)
 
     def add_track(self, name=None):
         """Adds a track to the engine and returns it."""
@@ -910,7 +1045,7 @@ class AudioEngine:
                             items = list(track.items)
                             
                         for item in items:
-                            if item.audio_data is None:
+                            if item.audio_data is None and not item.takes:
                                 continue
                                 
                             # Convert item samples to target sample rate
@@ -929,14 +1064,16 @@ class AudioEngine:
                                 write_offset = overlap_start - curr_sample
                                 length = overlap_end - overlap_start
                                 
-                                # Resample the sub-segment of item.audio_data to target sample rate
+                                # Resample the sub-segment to target sample rate
                                 orig_start = item.offset_samples + int((read_start / sample_rate) * item.sample_rate)
                                 orig_end = item.offset_samples + int((read_end / sample_rate) * item.sample_rate)
                                 
-                                item_ch = item.audio_data.shape[0]
+                                orig_start_abs = item.start_sample + int((read_start / sample_rate) * item.sample_rate)
+                                orig_len = max(1, orig_end - orig_start)
+                                
+                                orig_chunk_2d = item.get_audio_data_slice(orig_start_abs, orig_len)
                                 for ch in range(2):
-                                    read_ch = ch if ch < item_ch else 0
-                                    orig_chunk = item.audio_data[read_ch, orig_start:orig_end]
+                                    orig_chunk = orig_chunk_2d[ch]
                                     if len(orig_chunk) > 0:
                                         # Resample orig_chunk to length
                                         orig_indices = np.arange(len(orig_chunk))
@@ -1073,13 +1210,13 @@ class AudioEngine:
                 else:
                     rec_list.append(self.zero_block[:frames])
                 
-        # 2. Fetch playback from recorded items (if play is active)
+        # 2. Fetch playback from recorded items (if play is active and we are not recording on this track)
         playback_in = np.zeros((2, frames), dtype=np.float32)
-        if play_active:
+        if play_active and not (is_recording_state and is_armed):
             with track.lock:
                 items_copy = list(track.items)
             for item in items_copy:
-                if item.audio_data is None:
+                if item.audio_data is None and not item.takes:
                     continue
                 item_len = item.length_samples
                 item_start = item.start_sample
@@ -1090,14 +1227,10 @@ class AudioEngine:
                 overlap_end = min(curr_playhead + frames, item_end)
                 
                 if overlap_start < overlap_end:
-                    read_offset = (overlap_start - item_start) + item.offset_samples
                     write_offset = overlap_start - curr_playhead
                     length = overlap_end - overlap_start
-                    
-                    item_ch = item.audio_data.shape[0]
-                    for ch in range(2):
-                        read_ch = ch if ch < item_ch else 0
-                        playback_in[ch, write_offset : write_offset + length] += item.audio_data[read_ch, read_offset : read_offset + length]
+                    clip_slice = item.get_audio_data_slice(overlap_start, length)
+                    playback_in[:, write_offset : write_offset + length] += clip_slice
                     
         # Mix real-time input and playback items
         if is_armed:
