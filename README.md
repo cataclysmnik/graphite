@@ -38,6 +38,20 @@ With a premium dark aesthetic inspired by the "Nothing" design language, Graphit
 - **Project Serialization & Export:**
   - Save full sessions including all track layouts, audio clips, and full VST3 plugin states in JSON-based `.graphite` format.
   - Export final master mixes to high-fidelity WAV (16/24-bit) or MP3 formats.
+- **Visual Undo / Redo Engine:**
+  - Deep project snapshot tracking with up to 50 levels of history depth.
+  - Smart state reconciliation split into **Soft Restores** (for parameter adjustments, faders, and clip movements without interrupting the audio playback stream) and **Hard Restores** (restarting the audio stream only when tracks are added/removed or VST3 files are changed).
+- **Integrated Backing Track Manager:**
+  - Dedicated manager interface to import and organize backing tracks (`.wav`, `.mp3`, `.flac`, etc.) into a centralized local directory (`~/Documents/Graphite/BackingTracks`).
+  - Search filtering, renaming, and file deletion.
+  - Drag-and-drop tracks directly from the manager to the timeline to place them as audio clips, or load them directly via context menus.
+- **Smart Take Comping (Swipe Comping):**
+  - Record multiple takes over the same region to automatically build a multi-take folder.
+  - Expand/collapse folders to inspect takes vertically.
+  - Smooth swipe comping to select active regions from different takes and compile them into a seamless master track.
+- **Premium Brand Assets & Custom Splash Screen:**
+  - High-fidelity visual branding with PNG-based app icons.
+  - Clean, dedicated splash screen displaying custom `splashscreen.png` layout with an active loading progress bar and initialization status.
 
 ---
 
@@ -46,7 +60,7 @@ With a premium dark aesthetic inspired by the "Nothing" design language, Graphit
 ### Method 1: Using Pre-built Installer (Recommended for general use)
 If you do not want to install Python, you can use the standalone installer:
 1. Navigate to the **[Releases Tab](https://github.com/cataclysmnik/graphite/releases)** on GitHub.
-2. Download the latest installer executable (e.g., `Graphite_0.9.0_Installer.exe`).
+2. Download the latest installer executable (e.g., `Graphite_0.9.1_Installer.exe`).
 3. Run the installer and follow the setup wizard to install it normally.
 
 > [!NOTE]
@@ -97,14 +111,34 @@ Before recording, set up your audio settings to minimize latency:
 3. Select your input/output devices and set the active channel range.
 4. Set the buffer size (e.g., **128** or **256** samples) to achieve optimal latency without introducing buffer under-runs.
 
-### 2. Working with Auto-Arm Zones
+### 2. Using Undo and Redo
+You can roll back or re-apply any action:
+- **Undo last action:** Press `Ctrl + Z`.
+- **Redo action:** Press `Ctrl + Y`.
+- The engine uses **Soft Restores** for fader adjustments, pan changes, and clip moves to prevent audio dropouts during playback.
+
+### 3. Importing and Managing Backing Tracks
+Keep your backing tracks organized and drag them right onto the timeline:
+- **Import tracks:** Click **Import Track...** on the Backing Tracks panel to copy a `.wav` or `.mp3` file to your central library.
+- **Drag onto Timeline:** Click, hold, and drag any backing track from the manager list directly onto a timeline lane to place it as an audio clip.
+- **Quick Load:** Double-click or right-click a track and choose **Load into Project** to instantiate a new track lane with the audio file.
+- **Manage Files:** Right-click a track to **Rename...** or **Delete File** directly from disk.
+
+### 4. Smart Take Comping (Swipe Comping)
+Assemble the perfect solo or vocal take by combining the best sections of multiple recordings:
+- **Record Takes:** Record over an existing audio clip. Graphite automatically layers new takes into the clip rather than overwriting it.
+- **Toggle Take Folder:** Select the clip and press `C`, or double-click the **C** button on the left edge of the clip to expand the take list vertically.
+- **Swipe Comping:** Left-click and drag horizontally across a take to select it as the active composite region.
+- **Erase Comping:** Right-click and drag horizontally across any take to erase/de-select that segment.
+
+### 5. Working with Auto-Arm Zones
 Auto-arm zones allow you to define exactly when specific tracks should record or play back:
 - **Create a Zone:** Hold `Shift` and double-click in an empty space on any track lane.
 - **Move / Drag:** Click and drag the center of the zone to reposition it in time or move it to a different track.
 - **Resize:** Click and drag the left or right edges of the zone to adjust the exact start and end times.
 - **Record:** When recording starts, Graphite will automatically arm and record audio only when the playhead enters these zones.
 
-### 3. Adding and Reordering Effects
+### 6. Adding and Reordering Effects
 - Select a track to display its effects rack in the bottom dock.
 - Click **Add Built-in Effect** to add high-quality native guitar pedals, or click **Load VST3** to load external plugin files (`.vst3`).
 - Drag-and-drop effects in the list to change their placement in the audio processing chain.
