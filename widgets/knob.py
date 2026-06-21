@@ -6,6 +6,7 @@ from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QRadialGradient, QFont
 class CustomKnob(QWidget):
     """Custom metallic amp-style knob with flat graphite styling."""
     valueChanged = Signal(float)
+    dragStarted = Signal()
     
     def __init__(self, label="", min_val=0.0, max_val=1.0, default_val=0.0, unit="", decimals=1, parent=None):
         super().__init__(parent)
@@ -59,6 +60,7 @@ class CustomKnob(QWidget):
             self.last_mouse_pos = event.pos()
             self.is_dragging = True
             self.setCursor(Qt.CursorShape.BlankCursor)  # Hide cursor during drag
+            self.dragStarted.emit()
             self.update()
             
     def mouseReleaseEvent(self, event):
@@ -84,6 +86,7 @@ class CustomKnob(QWidget):
             
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.dragStarted.emit()
             self.setValue(self.default_val)
             
     def wheelEvent(self, event):
@@ -95,6 +98,7 @@ class CustomKnob(QWidget):
         if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
             step /= 10.0
             
+        self.dragStarted.emit()
         if angle > 0:
             self.setValue(self.value + step)
         else:
@@ -109,8 +113,10 @@ class CustomKnob(QWidget):
             step /= 10.0
             
         if event.key() in (Qt.Key.Key_Up, Qt.Key.Key_Right):
+            self.dragStarted.emit()
             self.setValue(self.value + step)
         elif event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Left):
+            self.dragStarted.emit()
             self.setValue(self.value - step)
         else:
             super().keyPressEvent(event)

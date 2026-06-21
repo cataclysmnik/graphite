@@ -460,6 +460,8 @@ class TimelineLanesWidget(QWidget):
                     
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                self.main_window.undo_manager.push_state("Delete Clip")
             deleted_any = False
             for target in list(self.selected_items):
                 for track in self.audio_engine.tracks:
@@ -509,6 +511,8 @@ class TimelineLanesWidget(QWidget):
                     }
             elif event.key() == Qt.Key.Key_X:
                 if self.selected_item and self.selected_track_for_item:
+                    if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                        self.main_window.undo_manager.push_state("Cut Clip")
                     self.clipboard_clip = {
                         "file_path": self.selected_item.file_path,
                         "audio_data": self.selected_item.audio_data.copy() if self.selected_item.audio_data is not None else None,
@@ -529,6 +533,8 @@ class TimelineLanesWidget(QWidget):
                         self.main_window.mark_project_dirty()
             elif event.key() == Qt.Key.Key_V:
                 if hasattr(self, 'clipboard_clip') and self.clipboard_clip is not None:
+                    if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                        self.main_window.undo_manager.push_state("Paste Clip")
                     target_track = None
                     if self.main_window and self.main_window.selected_track:
                         target_track = self.main_window.selected_track
@@ -556,6 +562,8 @@ class TimelineLanesWidget(QWidget):
                             self.main_window.mark_project_dirty()
         else:
             if event.key() == Qt.Key.Key_C:
+                if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                    self.main_window.undo_manager.push_state("Toggle Take Expansion")
                 toggled_any = False
                 for target in list(self.selected_items):
                     if getattr(target, "takes", None):
@@ -746,6 +754,8 @@ class TimelineLanesWidget(QWidget):
                             sub_y_top = y_track_top + self.lane_height + take_idx * 40
                             if sub_y_top <= y <= sub_y_top + 40:
                                 if event.button() == Qt.MouseButton.RightButton:
+                                    if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                                        self.main_window.undo_manager.push_state("De-select Comp Region")
                                     # Start right-swipe comp de-selection!
                                     self.right_swipe_item = item
                                     self.right_swipe_take_idx = take_idx
@@ -754,6 +764,8 @@ class TimelineLanesWidget(QWidget):
                                     self.setCursor(Qt.CursorShape.ForbiddenCursor)
                                     return
                                 else:
+                                    if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                                        self.main_window.undo_manager.push_state("Swipe Comp")
                                     # Start swipe comping!
                                     self.comp_swipe_item = item
                                     self.comp_swipe_take_idx = take_idx
@@ -770,6 +782,8 @@ class TimelineLanesWidget(QWidget):
                     start_x = int((item.start_sample / item.sample_rate) * self.pixels_per_second)
                     # Coordinates of C button: start_x + 4 to start_x + 22, and anywhere vertically in the main track lane
                     if (start_x + 4 <= x <= start_x + 22) and (y_track_top <= y <= y_track_top + self.lane_height):
+                        if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                            self.main_window.undo_manager.push_state("Toggle Take Expansion")
                         item.comp_expanded = not item.comp_expanded
                         self.update_geometry()
                         self.update()
@@ -779,6 +793,8 @@ class TimelineLanesWidget(QWidget):
                         
         # 3. Check if right button to start timeline deletion drag (on main track lane)
         if event.button() == Qt.MouseButton.RightButton:
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                self.main_window.undo_manager.push_state("Remove Clip Portion")
             self.right_drag_active = True
             self.right_drag_start_x = x
             self.right_drag_current_x = x
@@ -811,6 +827,9 @@ class TimelineLanesWidget(QWidget):
             self.trackSelected.emit(selected_idx)
             
         if target and track:
+            if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                action = "Resize Clip" if hover_type in ("resize_left", "resize_right") else "Move Clip"
+                self.main_window.undo_manager.push_state(action)
             modifiers = event.modifiers()
             if not (modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)):
                 self.selected_items.clear()

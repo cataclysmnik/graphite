@@ -18,6 +18,7 @@ from widgets.metronome import GuitarMetronomeWidget
 from widgets.mixer import MixerWidget
 from widgets.signal_flow import SignalFlowWidget
 import project_manager
+from widgets.undo_redo_manager import UndoRedoManager
 
 class TracksContainer(QWidget):
     def __init__(self, main_window, parent=None):
@@ -159,6 +160,7 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             splash.set_status("Initializing Audio Engine...", 30)
         # Initialize Audio Engine
         self.audio_engine = AudioEngine()
+        self.undo_manager = UndoRedoManager(self)
         
         if splash:
             splash.set_status("Creating default tracks...", 50)
@@ -297,6 +299,19 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.action_exit.setShortcut(QKeySequence("Ctrl+Q"))
         self.action_exit.triggered.connect(self.close)
         file_menu.addAction(self.action_exit)
+        
+        # Edit Menu
+        edit_menu = menu_bar.addMenu("Edit")
+        
+        self.action_undo = QAction("Undo", self)
+        self.action_undo.setShortcut(QKeySequence("Ctrl+Z"))
+        self.action_undo.triggered.connect(self.on_undo)
+        edit_menu.addAction(self.action_undo)
+        
+        self.action_redo = QAction("Redo", self)
+        self.action_redo.setShortcut(QKeySequence("Ctrl+Y"))
+        self.action_redo.triggered.connect(self.on_redo)
+        edit_menu.addAction(self.action_redo)
         
         # Track Menu
         track_menu = menu_bar.addMenu("Track")
@@ -956,6 +971,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         return last_card_geom.y() + last_card_geom.height() + 5
 
     def reorder_tracks(self, dragged_track_id, drop_y):
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.push_state("Reorder Tracks")
         # Find the card being dragged
         dragged_card = None
         for card in self.track_cards:
@@ -1087,6 +1104,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         
     def on_add_track(self):
         """Adds a track to audio engine and UI."""
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.push_state("Add Track")
         new_track = self.audio_engine.add_track()
         card = TrackCard(new_track, self.audio_engine)
         card.trackSelected.connect(self.on_track_selected)
@@ -1123,6 +1142,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             QApplication.processEvents()
             
             try:
+                if hasattr(self, 'undo_manager'):
+                    self.undo_manager.push_state("Add Backing Track")
                 # Add a new track called "Backing Track"
                 new_track = self.audio_engine.add_track("Backing Track")
                 sample_rate = self.audio_engine.sample_rate
@@ -1152,6 +1173,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
             self.mixer_widget.rebuild()
         
     def on_track_duplicated(self, track):
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.push_state("Duplicate Track")
         new_name = f"{track.name} (Copy)"
         new_track = self.audio_engine.add_track(name=new_name)
         
@@ -1219,6 +1242,8 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
 
     def on_track_removed(self, track):
         """Deletes a track from engine and UI."""
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.push_state("Delete Track")
         # Find card
         target_card = None
         for card in self.track_cards:
@@ -2070,3 +2095,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                 
         if state == "recording":
             self.timeline.btn_record.setStyleSheet("background-color: #ff0033; border-color: #ff0033; color: #ffffff;")
+
+    def on_undo(self):
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.undo()
+
+    def on_redo(self):
+        if hasattr(self, 'undo_manager'):
+            self.undo_manager.redo()

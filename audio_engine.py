@@ -443,7 +443,10 @@ class Track:
         """Constructs a new Pedalboard chain atomically."""
         with self.lock:
             active_fx = [wrap.effect for wrap in self.effects if wrap.is_active]
+            if hasattr(self, '_last_active_fx') and self._last_active_fx == active_fx:
+                return
             self.pedalboard = Pedalboard(active_fx)
+            self._last_active_fx = list(active_fx)
             # Run a dummy processing block on the main thread to force VST3/JUCE
             # initialization to happen on the main thread before the audio callback uses it.
             try:

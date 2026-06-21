@@ -237,6 +237,9 @@ class EffectCard(QFrame):
                         knob.valueChanged.connect(
                             lambda val, name=p_name: self.on_parameter_changed(name, val)
                         )
+                        knob.dragStarted.connect(
+                            lambda name=p_name: self.on_knob_drag_started(name)
+                        )
                         body.addWidget(knob)
                 body.addStretch()
         else:
@@ -251,6 +254,7 @@ class EffectCard(QFrame):
             )
             self.knob_mix.setValue(getattr(self.wrapper, "mix", 1.0) * 100.0)
             self.knob_mix.valueChanged.connect(self.on_vst_mix_changed)
+            self.knob_mix.dragStarted.connect(lambda: self.on_knob_drag_started("Mix"))
             body.addWidget(self.knob_mix)
             
             self.knob_gain = CustomKnob(
@@ -263,6 +267,7 @@ class EffectCard(QFrame):
             )
             self.knob_gain.setValue(getattr(self.wrapper, "gain_db", 0.0))
             self.knob_gain.valueChanged.connect(self.on_vst_gain_changed)
+            self.knob_gain.dragStarted.connect(lambda: self.on_knob_drag_started("Gain"))
             body.addWidget(self.knob_gain)
             body.addStretch()
                         
@@ -344,10 +349,19 @@ class EffectCard(QFrame):
         """)
         
     def on_bypass_toggle(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            action_str = "Bypass" if self.btn_bypass.isChecked() else "Unbypass"
+            main_win.undo_manager.push_state(f"{action_str} {self.wrapper.name}")
         # Wrapper is bypassed if bypass button is checked
         self.wrapper.is_active = not self.btn_bypass.isChecked()
         self.track.update_pedalboard()
         self.effectChanged.emit()
+        
+    def on_knob_drag_started(self, param_name):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Change {self.wrapper.name} {param_name}")
         
     def on_parameter_changed(self, param_name, value):
         if hasattr(self.wrapper.effect, param_name):
@@ -472,6 +486,9 @@ class EffectCard(QFrame):
         return None
 
     def on_delete_clicked(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Delete Effect {self.wrapper.name}")
         self.track.effects.remove(self.wrapper)
         self.track.update_pedalboard()
         self.effectChanged.emit()
@@ -682,6 +699,9 @@ class EffectsRack(QWidget):
     def on_effect_duplicated(self, wrapper):
         if not self.selected_track:
             return
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Duplicate Effect {wrapper.name}")
         import project_manager
         try:
             serialized = project_manager.serialize_effect(wrapper)
@@ -874,6 +894,9 @@ class EffectsRack(QWidget):
     def add_builtin_effect_by_type(self, fx_type, display_name):
         if not self.selected_track:
             return
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Add {display_name}")
         effect_obj = None
         try:
             if fx_type == "NoiseGate":
@@ -1045,6 +1068,8 @@ class EffectsRack(QWidget):
             return
             
         main_window = self.window()
+        if main_window and hasattr(main_window, 'undo_manager'):
+            main_window.undo_manager.push_state(f"Add VST Plugin")
         from widgets.loading_popup import LoadingPopup
         popup = LoadingPopup(f"LOADING VST PLUGIN:\n{os.path.basename(file_path).upper()}", main_window)
         popup.show()

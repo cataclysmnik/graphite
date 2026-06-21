@@ -517,3 +517,13 @@ class TrackCard(QFrame):
 
     def trigger_duplicate(self):
         self.trackDuplicated.emit(self.track)
+
+    def update_ui_states(self):
+        self.name_edit.setText(self.track.name)
+        self.btn_mute.setChecked(self.track.mute)
+        self.btn_solo.setChecked(self.track.solo)
+        self.btn_arm.setChecked(self.track.armed)
+        
+        idx = self.combo_input.findData(self.track.input_channel)
+        if idx >= 0:
+            self.combo_input.setCurrentIndex(idx)

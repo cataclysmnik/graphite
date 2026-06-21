@@ -222,6 +222,7 @@ class ChannelStrip(QWidget):
         self.fader.setValue(int(self.track.volume * 10))
         self.fader.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.fader.valueChanged.connect(self._on_fader)
+        self.fader.sliderPressed.connect(self._on_fader_pressed)
         col2.addWidget(self.fader, 1)
 
         # dB readout
@@ -237,6 +238,7 @@ class ChannelStrip(QWidget):
         self.pan_knob = _PanKnob(default_val=self.track.pan)
         self.pan_knob.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.pan_knob.valueChanged.connect(self._on_pan)
+        self.pan_knob.dragStarted.connect(self._on_pan_drag_started)
         col2.addWidget(self.pan_knob, 0, Qt.AlignmentFlag.AlignHCenter)
 
         body.addLayout(col2, 1)
@@ -263,6 +265,16 @@ class ChannelStrip(QWidget):
         if main_win and hasattr(main_win, 'mark_project_dirty'):
             main_win.mark_project_dirty()
 
+    def _on_fader_pressed(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Change Volume of {self.track.name}")
+
+    def _on_pan_drag_started(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state(f"Change Pan of {self.track.name}")
+
     def _on_fader(self, v):
         if self._guard:
             return
@@ -276,10 +288,18 @@ class ChannelStrip(QWidget):
         self.mark_dirty()
 
     def _on_mute(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            action_str = "Mute" if self.btn_mute.isChecked() else "Unmute"
+            main_win.undo_manager.push_state(f"{action_str} {self.track.name}")
         self.track.mute = self.btn_mute.isChecked()
         self.mark_dirty()
 
     def _on_solo(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            action_str = "Solo" if self.btn_solo.isChecked() else "Unsolo"
+            main_win.undo_manager.push_state(f"{action_str} {self.track.name}")
         self.track.solo = self.btn_solo.isChecked()
         self.mark_dirty()
 
@@ -300,6 +320,16 @@ class ChannelStrip(QWidget):
     def mousePressEvent(self, event):
         self.set_selected(True)
         super().mousePressEvent(event)
+
+    def update_ui_states(self):
+        self._guard = True
+        self.fader.setValue(int(self.track.volume * 10))
+        self._refresh_db(self.track.volume)
+        self._guard = False
+        self.pan_knob.setValue(self.track.pan)
+        self.btn_mute.setChecked(self.track.mute)
+        self.btn_solo.setChecked(self.track.solo)
+        self.lbl_name.setText(self.track.name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -358,6 +388,7 @@ class MasterStrip(QWidget):
         self.fader.setValue(int(self.audio_engine.main_volume * 10))
         self.fader.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.fader.valueChanged.connect(self._on_fader)
+        self.fader.sliderPressed.connect(self._on_fader_pressed)
         col.addWidget(self.fader, 1)
 
         self.lbl_db = QLabel()
@@ -381,6 +412,11 @@ class MasterStrip(QWidget):
         f.setFrameShape(QFrame.Shape.VLine)
         f.setStyleSheet(f"color:{SEP_COLOR}; background:{SEP_COLOR}; max-width:1px;")
         return f
+
+    def _on_fader_pressed(self):
+        main_win = self.window()
+        if main_win and hasattr(main_win, 'undo_manager'):
+            main_win.undo_manager.push_state("Change Master Volume")
 
     def _on_fader(self, v):
         db = v / 10.0
