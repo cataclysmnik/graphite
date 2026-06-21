@@ -382,6 +382,9 @@ class AudioEngine:
         
         self.play_state = "stopped"         # "stopped", "playing", "paused", "recording"
         self.playhead_samples = 0           # current playback cursor position in samples
+        self.loop_enabled = False
+        self.loop_start = 0                 # in samples
+        self.loop_end = 0                   # in samples
         self.recording_buffers = {}         # track_id -> list of numpy arrays
         self.recording_start_sample = 0
         
@@ -1289,6 +1292,9 @@ class AudioEngine:
         # 11. Advance playhead position
         if play_active:
             self.playhead_samples += frames
+            if self.loop_enabled and self.loop_end > self.loop_start:
+                if self.playhead_samples >= self.loop_end:
+                    self.playhead_samples = self.loop_start + (self.playhead_samples - self.loop_end) % (self.loop_end - self.loop_start)
 
 
 _temp_vst_dir = None

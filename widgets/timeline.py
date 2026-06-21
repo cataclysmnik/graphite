@@ -34,6 +34,8 @@ class TimeRulerWidget(QWidget):
         self.setMaximumHeight(30)
         
         self.is_scrubbing = False
+        self.drag_mode = None
+        self.lanes = None
         
     def set_scroll_offset(self, offset):
         self.scroll_offset = offset
@@ -43,17 +45,66 @@ class TimeRulerWidget(QWidget):
         self.pixels_per_second = pixels_per_second
         self.update()
         
+    def mouseDoubleClickEvent(self, event):
+        if hasattr(self, 'lanes') and self.lanes:
+            self.lanes.setup_loop_region()
+            
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            x = event.position().x()
+            abs_x = x + self.scroll_offset
+            margin = 8
+            
+            if self.audio_engine.loop_enabled and self.audio_engine.loop_end > self.audio_engine.loop_start:
+                loop_start_x = int((self.audio_engine.loop_start / sr) * self.pixels_per_second)
+                loop_end_x = int((self.audio_engine.loop_end / sr) * self.pixels_per_second)
+                
+                if abs(abs_x - loop_start_x) <= margin:
+                    self.drag_mode = "loop_start"
+                    return
+                elif abs(abs_x - loop_end_x) <= margin:
+                    self.drag_mode = "loop_end"
+                    return
+                    
             self.is_scrubbing = True
-            self.update_cursor_pos(event.position().x())
+            self.update_cursor_pos(x)
             
     def mouseMoveEvent(self, event):
-        if self.is_scrubbing:
-            self.update_cursor_pos(event.position().x())
+        sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+        x = event.position().x()
+        abs_x = x + self.scroll_offset
+        margin = 8
+        
+        if getattr(self, 'drag_mode', None) == "loop_start":
+            target_sample = max(0, int((abs_x / self.pixels_per_second) * sr))
+            self.audio_engine.loop_start = min(target_sample, self.audio_engine.loop_end - 1)
+            self.update()
+            if hasattr(self, 'lanes') and self.lanes:
+                self.lanes.update()
+        elif getattr(self, 'drag_mode', None) == "loop_end":
+            target_sample = max(0, int((abs_x / self.pixels_per_second) * sr))
+            self.audio_engine.loop_end = max(self.audio_engine.loop_start + 1, target_sample)
+            self.update()
+            if hasattr(self, 'lanes') and self.lanes:
+                self.lanes.update()
+        elif self.is_scrubbing:
+            self.update_cursor_pos(x)
+        else:
+            if self.audio_engine.loop_enabled and self.audio_engine.loop_end > self.audio_engine.loop_start:
+                loop_start_x = int((self.audio_engine.loop_start / sr) * self.pixels_per_second)
+                loop_end_x = int((self.audio_engine.loop_end / sr) * self.pixels_per_second)
+                
+                if abs(abs_x - loop_start_x) <= margin or abs(abs_x - loop_end_x) <= margin:
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
             
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_mode = None
             self.is_scrubbing = False
             
     def wheelEvent(self, event):
@@ -127,8 +178,30 @@ class TimeRulerWidget(QWidget):
                     painter.setPen(QPen(QColor("#222225"), 1))
                     painter.drawLine(x_pos, h - 6, x_pos, h - 2)
                     
-            # Draw Playhead Cap (Red Triangle)
+            # Draw loop range if enabled
             sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            if self.audio_engine.loop_enabled and self.audio_engine.loop_end > self.audio_engine.loop_start:
+                loop_start_x = int((self.audio_engine.loop_start / sr) * self.pixels_per_second)
+                loop_end_x = int((self.audio_engine.loop_end / sr) * self.pixels_per_second)
+                
+                # Draw shaded area in ruler
+                painter.fillRect(loop_start_x, 0, loop_end_x - loop_start_x, h - 2, QColor(255, 255, 255, 12))
+                
+                # Draw left handle
+                painter.setPen(QPen(QColor("#88888c"), 1.5))
+                painter.drawLine(loop_start_x, 0, loop_start_x, h)
+                painter.fillRect(loop_start_x, 0, 5, 8, QColor("#ffffff"))
+                painter.setPen(QPen(QColor("#222225"), 1))
+                painter.drawRect(loop_start_x, 0, 5, 8)
+                
+                # Draw right handle
+                painter.setPen(QPen(QColor("#88888c"), 1.5))
+                painter.drawLine(loop_end_x, 0, loop_end_x, h)
+                painter.fillRect(loop_end_x - 5, 0, 5, 8, QColor("#ffffff"))
+                painter.setPen(QPen(QColor("#222225"), 1))
+                painter.drawRect(loop_end_x - 5, 0, 5, 8)
+
+            # Draw Playhead Cap (Red Triangle)
             playhead_sec = self.audio_engine.playhead_samples / sr
             playhead_x = int(playhead_sec * self.pixels_per_second)
             
@@ -508,13 +581,45 @@ class TimelineLanesWidget(QWidget):
             self.box_select_current = None
             self.update()
             
+    def get_last_clip_end_sample(self):
+        max_end = 0
+        for track in self.audio_engine.tracks:
+            with track.lock:
+                for item in track.items:
+                    end_sample = item.start_sample + item.length_samples
+                    if end_sample > max_end:
+                        max_end = end_sample
+        return max_end
+
+    def setup_loop_region(self):
+        if self.audio_engine.loop_enabled:
+            self.audio_engine.loop_enabled = False
+        else:
+            sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            last_clip_end = self.get_last_clip_end_sample()
+            self.audio_engine.loop_start = 0
+            if last_clip_end == 0:
+                self.audio_engine.loop_end = int(5.0 * sr)
+            else:
+                self.audio_engine.loop_end = int(last_clip_end)
+            self.audio_engine.loop_enabled = True
+        self.update()
+        if hasattr(self, 'ruler') and self.ruler:
+            self.ruler.update()
+
     def mouseDoubleClickEvent(self, event):
-        # Double-click empty track lane space to import audio or create Auto-Arm zone
+        x = event.position().x()
         y = event.position().y()
+        target, target_type, track, hover_type = self.get_hover_state(x, y)
+        is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        if target is None and not is_shift:
+            self.setup_loop_region()
+            return
+            
+        # Double-click empty track lane space to import audio or create Auto-Arm zone
         track_idx = int(y // self.lane_height)
         if track_idx < len(self.audio_engine.tracks):
             track = self.audio_engine.tracks[track_idx]
-            x = event.position().x()
             sample_rate = self.audio_engine.sample_rate
             start_sample = int((x / self.pixels_per_second) * sample_rate)
             
@@ -834,8 +939,18 @@ class TimelineLanesWidget(QWidget):
                             line_y_bottom += 1
                         painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
                         
-            # 3. Draw Vertical Playhead Cursor Line
+            # 2.5 Draw Loop Region Shading
             sr = self.audio_engine.sample_rate if self.audio_engine else 44100
+            if self.audio_engine.loop_enabled and self.audio_engine.loop_end > self.audio_engine.loop_start:
+                loop_start_x = int((self.audio_engine.loop_start / sr) * self.pixels_per_second)
+                loop_end_x = int((self.audio_engine.loop_end / sr) * self.pixels_per_second)
+                painter.fillRect(loop_start_x, 0, loop_end_x - loop_start_x, h, QColor(255, 255, 255, 8))
+                pen = QPen(QColor(255, 255, 255, 60), 1.2, Qt.PenStyle.DashLine)
+                painter.setPen(pen)
+                painter.drawLine(loop_start_x, 0, loop_start_x, h)
+                painter.drawLine(loop_end_x, 0, loop_end_x, h)
+
+            # 3. Draw Vertical Playhead Cursor Line
             playhead_sec = self.audio_engine.playhead_samples / sr
             playhead_x = int(playhead_sec * self.pixels_per_second)
             
@@ -1060,6 +1175,8 @@ class TimelineScrollContainer(QWidget):
         self.lanes = TimelineLanesWidget(self.audio_engine, self.scroll_area)
         self.lanes.main_window = self.main_window
         self.lanes.set_zoom(self.pixels_per_second)
+        self.lanes.ruler = self.ruler
+        self.ruler.lanes = self.lanes
         self.scroll_area.setWidget(self.lanes)
         layout.addWidget(self.scroll_area)
         
