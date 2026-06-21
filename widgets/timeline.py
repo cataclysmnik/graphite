@@ -1066,6 +1066,7 @@ class TimelineScrollContainer(QWidget):
         # 1. Transport Toolbar above the Ruler
         self.toolbar = QWidget()
         self.toolbar.setObjectName("TimelineToolbar")
+        self.toolbar.setFixedHeight(31)
         self.toolbar.setStyleSheet("""
             QWidget#TimelineToolbar {
                 background-color: #000000;

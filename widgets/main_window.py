@@ -444,12 +444,13 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.tracks_scroll.setWidgetResizable(True)
         self.tracks_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.tracks_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tracks_scroll.setFrameShape(QFrame.Shape.NoFrame)
         
         self.tracks_container = TracksContainer(self)
         self.tracks_container.setObjectName("TracksContainer")
         self.tracks_layout = QVBoxLayout(self.tracks_container)
         self.tracks_layout.setContentsMargins(0, 0, 0, 0)
-        self.tracks_layout.setSpacing(10)
+        self.tracks_layout.setSpacing(0)
         self.tracks_layout.addStretch()
         
         self.tracks_scroll.setWidget(self.tracks_container)
