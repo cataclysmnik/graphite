@@ -337,7 +337,20 @@ class AudioItem:
         try:
             import soundfile as sf
             data, sr = sf.read(file_path, dtype='float32')
-            self.sample_rate = sr
+            if sr != self.sample_rate:
+                num_channels = 1 if data.ndim == 1 else data.shape[1]
+                target_len = int(len(data) * self.sample_rate / sr)
+                orig_indices = np.arange(len(data))
+                target_indices = np.linspace(0, len(data) - 1, target_len)
+                
+                if data.ndim == 1:
+                    data = np.interp(target_indices, orig_indices, data)
+                else:
+                    resampled = np.zeros((target_len, num_channels), dtype=np.float32)
+                    for ch in range(num_channels):
+                        resampled[:, ch] = np.interp(target_indices, orig_indices, data[:, ch])
+                    data = resampled
+            
             if data.ndim == 1:
                 self.audio_data = np.reshape(data, (1, -1))
             else:
@@ -353,7 +366,7 @@ class AudioItem:
             with wave.open(file_path, 'rb') as w:
                 ch = w.getnchannels()
                 width = w.getsampwidth()
-                self.sample_rate = w.getframerate()
+                file_sr = w.getframerate()
                 nframes = w.getnframes()
                 if nframes == 0:
                     self.audio_data = None
@@ -368,6 +381,18 @@ class AudioItem:
                     self.audio_data = np.reshape(raw_data, (1, -1))
                 else:
                     self.audio_data = None
+                
+                # Resample if needed
+                if self.audio_data is not None and file_sr != self.sample_rate:
+                    orig_len = self.audio_data.shape[1]
+                    target_len = int(orig_len * self.sample_rate / file_sr)
+                    orig_indices = np.arange(orig_len)
+                    target_indices = np.linspace(0, orig_len - 1, target_len)
+                    
+                    resampled = np.zeros((self.audio_data.shape[0], target_len), dtype=np.float32)
+                    for ch_idx in range(self.audio_data.shape[0]):
+                        resampled[ch_idx, :] = np.interp(target_indices, orig_indices, self.audio_data[ch_idx, :])
+                    self.audio_data = resampled
                 
                 if self.audio_data is not None:
                     self.length_samples = self.audio_data.shape[1]

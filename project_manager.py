@@ -237,15 +237,20 @@ def load_project(file_path, audio_engine):
                         abs_path = os.path.abspath(os.path.join(os.path.dirname(file_path), rel_path))
                     else:
                         abs_path = ""
+                    saved_sr = item_data.get("sample_rate", audio_engine.sample_rate)
+                    current_sr = audio_engine.sample_rate
+                    scale = current_sr / saved_sr if saved_sr else 1.0
+                    
+                    start_sample = int(item_data["start_sample"] * scale)
                     item = AudioItem(
-                        start_sample=item_data["start_sample"],
-                        sample_rate=item_data["sample_rate"],
+                        start_sample=start_sample,
+                        sample_rate=current_sr,
                         file_path=abs_path
                     )
                     if "offset_samples" in item_data:
-                        item.offset_samples = item_data["offset_samples"]
+                        item.offset_samples = int(item_data["offset_samples"] * scale)
                     if "length_samples" in item_data:
-                        item.length_samples = item_data["length_samples"]
+                        item.length_samples = int(item_data["length_samples"] * scale)
                     item.custom_name = item_data.get("custom_name", None)
                     track.items.append(item)
                     
