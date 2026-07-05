@@ -191,19 +191,45 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.setup_ui()
         self.init_frameless(self.title_bar)
         
+        # Check for crash lock file
+        appdata = os.environ.get('APPDATA')
+        if not appdata:
+            appdata = os.path.expanduser("~")
+        config_dir = os.path.join(appdata, "GraphiteDAW")
+        lock_file = os.path.join(config_dir, "startup.lock")
+        
+        crashed_last_time = False
+        if os.path.exists(lock_file):
+            crashed_last_time = True
+            try:
+                os.remove(lock_file)
+            except Exception:
+                pass
+
         # Load startup project if set
         startup_path = getattr(self.audio_engine, "startup_project_path", "")
         if startup_path and os.path.exists(startup_path):
-            try:
-                import project_manager
-                success = project_manager.load_project(startup_path, self.audio_engine)
-                if success:
-                    print(f"Loaded startup project: {startup_path}")
-                    self.refresh_track_cards()
-                    if hasattr(self, 'mixer_widget'):
-                        self.mixer_widget.rebuild()
-            except Exception as e:
-                print(f"Failed to load startup project: {e}")
+            if crashed_last_time:
+                print("Detected a crash during previous startup. Bypassing startup project.")
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Startup Recovery", 
+                    "Graphite closed unexpectedly during startup last time. "
+                    "The auto-start project has been bypassed to prevent a crash loop.")
+            else:
+                try:
+                    os.makedirs(os.path.dirname(lock_file), exist_ok=True)
+                    with open(lock_file, "w") as f:
+                        f.write("1")
+                        
+                    import project_manager
+                    success = project_manager.load_project(startup_path, self.audio_engine)
+                    if success:
+                        print(f"Loaded startup project: {startup_path}")
+                        self.refresh_track_cards()
+                        if hasattr(self, 'mixer_widget'):
+                            self.mixer_widget.rebuild()
+                except Exception as e:
+                    print(f"Failed to load startup project: {e}")
         
         # Select first track by default
         if self.track_cards:
@@ -219,6 +245,13 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         # Start the audio stream at startup automatically
         self.audio_engine.start_stream()
         self.update_stream_btn_style()
+        
+        # Remove lock file if we reached here successfully
+        if os.path.exists(lock_file) and not crashed_last_time:
+            try:
+                os.remove(lock_file)
+            except Exception:
+                pass
         
         if splash:
             splash.set_status("Graphite ready!", 100)

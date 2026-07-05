@@ -1,5 +1,6 @@
 import os
 os.environ["SD_ENABLE_ASIO"] = "1"
+
 import math
 
 import sounddevice as sd
@@ -475,9 +476,10 @@ class Track:
             self._last_active_fx = list(active_fx)
             # Run a dummy processing block on the main thread to force VST3/JUCE
             # initialization to happen on the main thread before the audio callback uses it.
+            # Use a large block size (8192) so convolution-based VSTs allocate large enough internal buffers!
             try:
                 import numpy as np
-                dummy_in = np.zeros((2, 128), dtype=np.float32)
+                dummy_in = np.zeros((2, 8192), dtype=np.float32)
                 self.pedalboard(dummy_in, sample_rate)
             except Exception as e:
                 print(f"Warning: Dummy pedalboard initialization failed: {e}")
@@ -1494,31 +1496,11 @@ def clean_temp_vsts():
         _temp_vst_dir = None
 
 def load_vst_plugin(vst_path):
-    """Loads a VST plugin by making a unique copy of its DLL to avoid handle/state collisions."""
-    import uuid
-    import shutil
+    """Loads a VST plugin directly from its path."""
     import os
     from pedalboard import load_plugin
     
     if not os.path.exists(vst_path):
         raise FileNotFoundError(f"VST plugin not found: {vst_path}")
         
-    # Create a unique subdirectory under the temp VST directory
-    base_temp = get_temp_vst_dir()
-    unique_id = uuid.uuid4().hex[:8]
-    inst_dir = os.path.join(base_temp, f"inst_{unique_id}")
-    os.makedirs(inst_dir, exist_ok=True)
-    
-    # We copy the VST3 bundle (either folder or file)
-    vst_name = os.path.basename(vst_path)
-    temp_path = os.path.join(inst_dir, vst_name)
-    
-    if os.path.isdir(vst_path):
-        shutil.copytree(vst_path, temp_path)
-    else:
-        shutil.copy(vst_path, temp_path)
-        
-    _temp_vst_instances.append(temp_path)
-    
-    # Load from the copied temporary path
-    return load_plugin(temp_path)
+    return load_plugin(vst_path)

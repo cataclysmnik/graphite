@@ -1,6 +1,7 @@
 import os
 os.environ["SD_ENABLE_ASIO"] = "1"
 
+
 # Import and initialize pedalboard early to force C++/JUCE/COM initialization
 # before PySide6/Qt creates its QApplication/thread structures.
 import numpy as np
