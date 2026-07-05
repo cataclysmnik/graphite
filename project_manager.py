@@ -152,6 +152,8 @@ def save_project(file_path, audio_engine):
                         "file_path": rel_path,
                         "offset_samples": item.offset_samples,
                         "length_samples": item.length_samples,
+                        "fade_in_samples": getattr(item, "fade_in_samples", 0),
+                        "fade_out_samples": getattr(item, "fade_out_samples", 0),
                         "custom_name": getattr(item, "custom_name", None)
                     }
                     track_data["items"].append(item_data)
@@ -251,6 +253,10 @@ def load_project(file_path, audio_engine):
                         item.offset_samples = int(item_data["offset_samples"] * scale)
                     if "length_samples" in item_data:
                         item.length_samples = int(item_data["length_samples"] * scale)
+                    if "fade_in_samples" in item_data:
+                        item.fade_in_samples = int(item_data["fade_in_samples"] * scale)
+                    if "fade_out_samples" in item_data:
+                        item.fade_out_samples = int(item_data["fade_out_samples"] * scale)
                     item.custom_name = item_data.get("custom_name", None)
                     track.items.append(item)
                     

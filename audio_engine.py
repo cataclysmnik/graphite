@@ -204,6 +204,8 @@ class AudioItem:
         self.audio_data = audio_data  # 2D numpy array: shape (channels, samples)
         self.offset_samples = 0
         self.length_samples = 0
+        self.fade_in_samples = 0
+        self.fade_out_samples = 0
         self.takes = []                     # list of child AudioItem objects
         self.active_take_index = 0          # fallback active take index
         self.comp_ranges = []               # list of [start_sample, end_sample, take_index]
@@ -232,6 +234,28 @@ class AudioItem:
                 for ch in range(2):
                     read_ch = ch if ch < item_ch else 0
                     out_buf[ch, :slice_len] = self.audio_data[read_ch, read_offset : read_offset + slice_len]
+                
+                # Apply Fades
+                if self.fade_in_samples > 0 and start_sample < self.start_sample + self.fade_in_samples:
+                    fade_end_local = min(slice_len, self.start_sample + self.fade_in_samples - start_sample)
+                    fade_start_sample = start_sample - self.start_sample
+                    fade_curve = np.linspace(
+                        fade_start_sample / self.fade_in_samples, 
+                        (fade_start_sample + fade_end_local) / self.fade_in_samples, 
+                        fade_end_local, dtype=np.float32
+                    )
+                    out_buf[:, :fade_end_local] *= fade_curve
+
+                if self.fade_out_samples > 0 and start_sample + slice_len > self.start_sample + self.length_samples - self.fade_out_samples:
+                    item_end = self.start_sample + self.length_samples
+                    fade_start_local = max(0, item_end - self.fade_out_samples - start_sample)
+                    fade_start_sample = start_sample + fade_start_local - (item_end - self.fade_out_samples)
+                    fade_curve = np.linspace(
+                        1.0 - (fade_start_sample / self.fade_out_samples),
+                        1.0 - ((fade_start_sample + (slice_len - fade_start_local)) / self.fade_out_samples),
+                        slice_len - fade_start_local, dtype=np.float32
+                    )
+                    out_buf[:, fade_start_local:slice_len] *= fade_curve
             return out_buf
             
         # Comp folder item playback
@@ -304,6 +328,28 @@ class AudioItem:
                                     val2 = take2.audio_data[ch2, offset2_v]
                                     out_buf[ch, out_idx_v] = (val1 * w_out_v) + (val2 * w_in_v)
                                         
+        # Apply item-level fades to the comped buffer
+        if self.fade_in_samples > 0 and start_sample < self.start_sample + self.fade_in_samples:
+            fade_end_local = min(length_samples, self.start_sample + self.fade_in_samples - start_sample)
+            fade_start_sample = start_sample - self.start_sample
+            fade_curve = np.linspace(
+                fade_start_sample / self.fade_in_samples, 
+                (fade_start_sample + fade_end_local) / self.fade_in_samples, 
+                fade_end_local, dtype=np.float32
+            )
+            out_buf[:, :fade_end_local] *= fade_curve
+
+        if self.fade_out_samples > 0 and start_sample + length_samples > self.start_sample + self.length_samples - self.fade_out_samples:
+            item_end = self.start_sample + self.length_samples
+            fade_start_local = max(0, item_end - self.fade_out_samples - start_sample)
+            fade_start_sample = start_sample + fade_start_local - (item_end - self.fade_out_samples)
+            fade_curve = np.linspace(
+                1.0 - (fade_start_sample / self.fade_out_samples),
+                1.0 - ((fade_start_sample + (length_samples - fade_start_local)) / self.fade_out_samples),
+                length_samples - fade_start_local, dtype=np.float32
+            )
+            out_buf[:, fade_start_local:] *= fade_curve
+
         return out_buf
 
     def update_cached_comp_data(self):

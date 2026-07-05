@@ -326,16 +326,40 @@ class TimelineLanesWidget(QWidget):
             item_end_x = int(((item.start_sample + item.length_samples) / item.sample_rate) * self.pixels_per_second)
             
             if item_start_x - margin <= x <= item_end_x + margin:
+                # Check Fade handles first (top of the item)
+                y_top = track_idx * self.lane_height + 30
+                is_top = y_top <= y <= y_top + 16
+                
+                fade_in_s = getattr(item, "fade_in_samples", 0)
+                fade_out_s = getattr(item, "fade_out_samples", 0)
+                
+                fade_in_px = int((fade_in_s / item.sample_rate) * self.pixels_per_second)
+                fade_out_px = int((fade_out_s / item.sample_rate) * self.pixels_per_second)
+                
+                fade_in_x = item_start_x + fade_in_px
+                fade_out_x = item_end_x - fade_out_px
+                
+                dist_fade_in = abs(x - fade_in_x)
+                dist_fade_out = abs(x - fade_out_x)
+                
                 dist_left = abs(x - item_start_x)
                 dist_right = abs(x - item_end_x)
                 
-                # Check near left edge
-                if dist_left <= margin and dist_left < min_dist:
+                if is_top and dist_fade_in <= margin and dist_fade_in < min_dist:
+                    min_dist = dist_fade_in
+                    best_target = item
+                    best_target_type = "item"
+                    best_type = "fade_in"
+                elif is_top and dist_fade_out <= margin and dist_fade_out < min_dist:
+                    min_dist = dist_fade_out
+                    best_target = item
+                    best_target_type = "item"
+                    best_type = "fade_out"
+                elif dist_left <= margin and dist_left < min_dist:
                     min_dist = dist_left
                     best_target = item
                     best_target_type = "item"
                     best_type = "resize_left"
-                # Check near right edge
                 elif dist_right <= margin and dist_right < min_dist:
                     min_dist = dist_right
                     best_target = item
@@ -579,6 +603,68 @@ class TimelineLanesWidget(QWidget):
                     if hasattr(self, 'main_window') and self.main_window:
                         self.main_window.mark_project_dirty()
                     return
+            elif event.key() == Qt.Key.Key_S:
+                if hasattr(self, 'main_window') and hasattr(self.main_window, 'undo_manager'):
+                    self.main_window.undo_manager.push_state("Split Item(s)")
+                
+                playhead = self.audio_engine.playhead_samples
+                split_any = False
+                
+                targets = list(self.selected_items)
+                if self.selected_item and self.selected_item not in targets:
+                    targets.append(self.selected_item)
+                    
+                # If no items selected, split ALL items under the playhead
+                if not targets:
+                    for track in self.audio_engine.tracks:
+                        with track.lock:
+                            for item in track.items:
+                                if item.start_sample < playhead < item.start_sample + item.length_samples:
+                                    targets.append(item)
+                                    
+                for target in targets:
+                    if getattr(target, "audio_data", None) is not None:
+                        # Find the track this belongs to
+                        parent_track = None
+                        for track in self.audio_engine.tracks:
+                            if target in track.items:
+                                parent_track = track
+                                break
+                        
+                        if parent_track and target.start_sample < playhead < target.start_sample + target.length_samples:
+                            split_any = True
+                            with parent_track.lock:
+                                split_offset = playhead - target.start_sample
+                                
+                                # Clone for the right half
+                                right_item = self.clone_audio_item(target)
+                                
+                                # Adjust Left Half
+                                target.length_samples = split_offset
+                                # Add 5ms crossfade on left (fade out)
+                                fade_samples = min(int(0.005 * self.audio_engine.sample_rate), target.length_samples // 2)
+                                target.fade_out_samples = max(target.fade_out_samples, fade_samples)
+                                
+                                # Adjust Right Half
+                                right_item.start_sample = playhead
+                                right_item.offset_samples += split_offset
+                                right_item.length_samples -= split_offset
+                                # Add 5ms crossfade on right (fade in)
+                                right_item.fade_in_samples = max(right_item.fade_in_samples, fade_samples)
+                                
+                                parent_track.items.append(right_item)
+                                
+                                # If it was selected, also select the new right half
+                                if target in self.selected_items:
+                                    self.selected_items.add(right_item)
+                
+                if split_any:
+                    self.update_geometry()
+                    self.update()
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.mark_project_dirty()
+                    return
+
             super().keyPressEvent(event)
             
     def wheelEvent(self, event):
@@ -832,6 +918,8 @@ class TimelineLanesWidget(QWidget):
                 self.drag_start_sample = target.start_sample
                 self.drag_offset_samples = target.offset_samples
                 self.drag_length_samples = target.length_samples
+                self.drag_fade_in_samples = getattr(target, "fade_in_samples", 0)
+                self.drag_fade_out_samples = getattr(target, "fade_out_samples", 0)
                 self.drag_offset_samples_click = click_sample - target.start_sample
             else: # arm_region
                 self.drag_start_sample = target[0]
@@ -840,6 +928,8 @@ class TimelineLanesWidget(QWidget):
             
             if hover_type in ("resize_left", "resize_right"):
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif hover_type in ("fade_in", "fade_out"):
+                self.setCursor(Qt.CursorShape.CrossCursor)
             elif hover_type == "move":
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             self.update()
@@ -1053,6 +1143,33 @@ class TimelineLanesWidget(QWidget):
                     new_length = max(min_len, new_length)
                     with self.drag_track.lock:
                         self.active_drag_item[1] = self.drag_start_sample + new_length
+                        
+            elif self.active_drag_mode == "fade_in":
+                if target_type == "item":
+                    mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                    click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                    delta_samples = mouse_sample - click_mouse_sample
+                    
+                    new_fade_in = self.drag_fade_in_samples + delta_samples
+                    # Bound between 0 and the item length
+                    new_fade_in = max(0, min(new_fade_in, self.active_drag_item.length_samples))
+                    
+                    with self.drag_track.lock:
+                        self.active_drag_item.fade_in_samples = new_fade_in
+
+            elif self.active_drag_mode == "fade_out":
+                if target_type == "item":
+                    mouse_sample = int((x / self.pixels_per_second) * sample_rate)
+                    click_mouse_sample = int((self.drag_click_x / self.pixels_per_second) * sample_rate)
+                    delta_samples = mouse_sample - click_mouse_sample
+                    
+                    # For fade_out, dragging left (negative delta) increases fade length
+                    new_fade_out = self.drag_fade_out_samples - delta_samples
+                    # Bound between 0 and the item length
+                    new_fade_out = max(0, min(new_fade_out, self.active_drag_item.length_samples))
+                    
+                    with self.drag_track.lock:
+                        self.active_drag_item.fade_out_samples = new_fade_out
                     
             self.update_geometry()
         elif self.box_select_start is not None:
@@ -1710,6 +1827,50 @@ class TimelineLanesWidget(QWidget):
                             if line_y_top == line_y_bottom:
                                 line_y_bottom += 1
                             painter.drawLine(line_x, line_y_top, line_x, line_y_bottom)
+                            
+                    # Draw Fades and Handles
+                    fade_in_s = getattr(item, "fade_in_samples", 0)
+                    fade_out_s = getattr(item, "fade_out_samples", 0)
+                    
+                    if fade_in_s > 0:
+                        fade_in_px = int((fade_in_s / item.sample_rate) * self.pixels_per_second)
+                        fade_in_px = min(fade_in_px, item_width)
+                        poly = [
+                            QPoint(start_x, y_top + draw_h),
+                            QPoint(start_x, y_top),
+                            QPoint(start_x + fade_in_px, y_top)
+                        ]
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(0, 0, 0, 120))
+                        painter.drawPolygon(poly)
+                        
+                        painter.setPen(QColor("#ffffff"))
+                        painter.setBrush(QColor("#ffffff"))
+                        painter.drawRect(start_x + fade_in_px - 4, y_top, 8, 8)
+                    else:
+                        painter.setPen(QColor("#ffffff"))
+                        painter.setBrush(QColor("#ffffff"))
+                        painter.drawRect(start_x, y_top, 8, 8)
+
+                    if fade_out_s > 0:
+                        fade_out_px = int((fade_out_s / item.sample_rate) * self.pixels_per_second)
+                        fade_out_px = min(fade_out_px, item_width)
+                        poly = [
+                            QPoint(start_x + item_width, y_top + draw_h),
+                            QPoint(start_x + item_width, y_top),
+                            QPoint(start_x + item_width - fade_out_px, y_top)
+                        ]
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(QColor(0, 0, 0, 120))
+                        painter.drawPolygon(poly)
+                        
+                        painter.setPen(QColor("#ffffff"))
+                        painter.setBrush(QColor("#ffffff"))
+                        painter.drawRect(start_x + item_width - fade_out_px - 4, y_top, 8, 8)
+                    else:
+                        painter.setPen(QColor("#ffffff"))
+                        painter.setBrush(QColor("#ffffff"))
+                        painter.drawRect(start_x + item_width - 8, y_top, 8, 8)
                             
                     # Draw take sub-lanes if expanded
                     if getattr(item, "comp_expanded", False) and getattr(item, "takes", None):
