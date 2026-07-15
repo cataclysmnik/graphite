@@ -321,6 +321,11 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         self.action_save.triggered.connect(self.on_save_project)
         file_menu.addAction(self.action_save)
         
+        self.action_save_as = QAction("Save Project As...", self)
+        self.action_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self.action_save_as.triggered.connect(self.on_save_project_as)
+        file_menu.addAction(self.action_save_as)
+        
         self.action_export = QAction("Export Audio...", self)
         self.action_export.setShortcut(QKeySequence("Ctrl+E"))
         self.action_export.triggered.connect(self.on_export_audio)
@@ -1556,9 +1561,45 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
                 self.timeline.update_track_layout()
 
     def on_save_project(self):
+        """Saves current state. Auto-saves to current path if set, otherwise prompts user."""
+        if getattr(self, "current_project_path", ""):
+            QApplication.processEvents()
+            
+            from widgets.loading_popup import LoadingPopup
+            popup = LoadingPopup("SAVING GRAPHITE PROJECT...", self)
+            popup.show()
+            QApplication.processEvents()
+            
+            try:
+                success = project_manager.save_project(self.current_project_path, self.audio_engine)
+            finally:
+                popup.hide()
+                popup.close()
+                QApplication.processEvents()
+                
+            if success:
+                self.project_dirty = False
+                self.update_title_bar()
+                self.show_themed_message_box(
+                    "Project Saved",
+                    f"Successfully saved session to:\n{os.path.basename(self.current_project_path)}",
+                    QMessageBox.Icon.Information
+                )
+                return True
+            else:
+                self.show_themed_message_box(
+                    "Save Error",
+                    "Failed to save project file.",
+                    QMessageBox.Icon.Critical
+                )
+                return False
+        else:
+            return self.on_save_project_as()
+
+    def on_save_project_as(self):
         """Saves current state to JSON file dialog."""
         dlg = QFileDialog(self)
-        dlg.setWindowTitle("Save Graphite Session")
+        dlg.setWindowTitle("Save Graphite Session As")
         dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
         dlg.setNameFilter("Graphite DAW Project (*.graphite)")
         dlg.setDefaultSuffix("graphite")
