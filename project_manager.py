@@ -32,7 +32,7 @@ def serialize_effect(wrapper):
         "parameters": {}
     }
     
-    if wrapper.effect_type == "VST3":
+    if wrapper.effect_type in ("VST3", "NeuralAmpModeler"):
         # For VST3 plugins, store path and raw_state
         original_path = getattr(wrapper, "original_vst_path", None)
         if not original_path:
@@ -45,6 +45,10 @@ def serialize_effect(wrapper):
         except Exception as e:
             print(f"Error serializing VST3 state: {e}")
             data["raw_state"] = ""
+            
+        if wrapper.effect_type == "NeuralAmpModeler":
+            data["loaded_model_name"] = getattr(wrapper, "loaded_model_name", "No model loaded")
+            data["loaded_ir_name"] = getattr(wrapper, "loaded_ir_name", "No IR loaded")
     elif wrapper.effect_type in EFFECT_CLASSES:
         _, params = EFFECT_CLASSES[wrapper.effect_type]
         for p in params:
@@ -59,9 +63,35 @@ def deserialize_effect(data):
     name = data["name"]
     is_active = data.get("is_active", True)
     
-    if effect_type == "VST3":
+    if effect_type in ("VST3", "NeuralAmpModeler"):
         vst_path = data.get("vst_path", "")
+        if effect_type == "NeuralAmpModeler":
+            # Try to resolve path from local audio settings first
+            try:
+                import json
+                settings_file = os.path.join(os.path.dirname(__file__), "audio_settings.json")
+                if os.path.exists(settings_file):
+                    with open(settings_file, "r") as f:
+                        settings_data = json.load(f)
+                    custom_path = settings_data.get("nam_vst_path", "")
+                    if custom_path and os.path.exists(custom_path):
+                        vst_path = custom_path
+            except Exception:
+                pass
+                
         if not vst_path or not os.path.exists(vst_path):
+            if effect_type == "NeuralAmpModeler":
+                print(f"NeuralAmpModeler VST3 file not found: {vst_path}. Using placeholder.")
+                from pedalboard import Gain
+                effect_obj = Gain(gain_db=0.0)
+                wrapper = EffectWrapper(effect_obj, name, "NeuralAmpModeler", is_active)
+                wrapper.original_vst_path = vst_path
+                wrapper.mix = data.get("mix", 1.0)
+                wrapper.gain_db = data.get("gain_db", 0.0)
+                wrapper.is_vst_missing = True
+                wrapper.loaded_model_name = data.get("loaded_model_name", "No model loaded")
+                wrapper.loaded_ir_name = data.get("loaded_ir_name", "No IR loaded")
+                return wrapper
             print(f"VST3 file not found: {vst_path}")
             return None
         try:
@@ -70,10 +100,13 @@ def deserialize_effect(data):
             raw_state_b64 = data.get("raw_state", "")
             if raw_state_b64:
                 effect_obj.raw_state = base64.b64decode(raw_state_b64)
-            wrapper = EffectWrapper(effect_obj, name, "VST3", is_active)
+            wrapper = EffectWrapper(effect_obj, name, effect_type, is_active)
             wrapper.original_vst_path = vst_path
             wrapper.mix = data.get("mix", 1.0)
             wrapper.gain_db = data.get("gain_db", 0.0)
+            if effect_type == "NeuralAmpModeler":
+                wrapper.loaded_model_name = data.get("loaded_model_name", "No model loaded")
+                wrapper.loaded_ir_name = data.get("loaded_ir_name", "No IR loaded")
             return wrapper
         except Exception as e:
             print(f"Failed to load VST3 plugin at {vst_path}: {e}")

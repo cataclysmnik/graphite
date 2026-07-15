@@ -130,8 +130,180 @@ EFFECT_TYPES = {
     "Compressor": "Compressor",
     "Lowpass Filter": "LowpassFilter",
     "Highpass Filter": "HighpassFilter",
+    "Neural Amp Modeler": "NeuralAmpModeler",
 }
 
+def find_nam_vst3(search_paths=None, audio_engine=None):
+    if audio_engine and getattr(audio_engine, "nam_vst_path", ""):
+        custom_path = audio_engine.nam_vst_path
+        if os.path.exists(custom_path):
+            return custom_path
+
+    if not search_paths:
+        search_paths = ["C:\\Program Files\\Common Files\\VST3"]
+    # Check exact paths first for both Gateway and NeuralAmpModeler
+    standard_paths = [
+        "C:\\Program Files\\Common Files\\VST3\\Gateway.vst3",
+        "C:\\Program Files\\Common Files\\VST3\\NeuralAmpModeler.vst3",
+        "C:\\Program Files\\Common Files\\VST3\\NeuralAmpModeler\\NeuralAmpModeler.vst3",
+        "C:\\Program Files\\Common Files\\VST3\\Gateway\\Gateway.vst3"
+    ]
+    for p in standard_paths:
+        if os.path.exists(p):
+            return p
+    # Otherwise search scanned VSTs
+    scanned = scan_for_vst3s(search_paths)
+    for name, path in scanned:
+        name_lower = name.lower()
+        if "gateway" in name_lower or "neuralampmodeler" in name_lower or name_lower == "nam" or "neural amp modeler" in name_lower:
+            return path
+    return None
+
+def get_vst_param_info(vst, param_name):
+    # Returns (current_val, min_val, max_val, unit)
+    if not vst or not hasattr(vst, "parameters") or param_name not in vst.parameters:
+        return (0.5, 0.0, 1.0, "")
+    
+    p = vst.parameters[param_name]
+    min_v = getattr(p, "min_value", 0.0)
+    max_v = getattr(p, "max_value", 1.0)
+    
+    # Sometimes min/max are None or not numbers, fall back to 0.0, 1.0
+    if min_v is None or not isinstance(min_v, (int, float)):
+        min_v = 0.0
+    if max_v is None or not isinstance(max_v, (int, float)):
+        max_v = 1.0
+        
+    curr_v = getattr(vst, p.name, getattr(p, "value", 0.5))
+    if curr_v is None or not isinstance(curr_v, (int, float)):
+        curr_v = (min_v + max_v) / 2.0
+        
+    # Get unit
+    unit = getattr(p, "label", "") or getattr(p, "unit", "")
+    if not isinstance(unit, str):
+        unit = ""
+        
+    return (curr_v, min_v, max_v, unit)
+
+def patch_nam_vst_state(raw_state_b64, new_path, is_ir=False):
+    import base64
+    try:
+        raw_state = base64.b64decode(raw_state_b64)
+        start_tag = b"<IComponent>"
+        end_tag = b"</IComponent>"
+        start_idx = raw_state.find(start_tag)
+        end_idx = raw_state.find(end_tag)
+        if start_idx == -1 or end_idx == -1:
+            return raw_state_b64
+            
+        icomponent_b64 = raw_state[start_idx + len(start_tag):end_idx].decode('utf-8')
+        
+        # JUCE Base64 translate & decode
+        s_std = icomponent_b64.replace('.', '+').replace('-', '/')
+        padding = len(s_std) % 4
+        if padding > 0:
+            s_std += '=' * (4 - padding)
+        binary_data = bytearray(base64.b64decode(s_std))
+        
+        # Find paths in binary data
+        found_paths = []
+        exts = (b".wav",) if is_ir else (b".nam", b".namb")
+        for ext in exts:
+            idx = 0
+            while True:
+                idx = binary_data.lower().find(ext, idx)
+                if idx == -1:
+                    break
+                # Backtrack
+                start_idx_p = idx
+                while start_idx_p > 0:
+                    char = binary_data[start_idx_p - 1:start_idx_p]
+                    if char[0] in b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:\\/._- +%()[]{}":
+                        start_idx_p -= 1
+                    else:
+                        break
+                path_bytes = binary_data[start_idx_p:idx + len(ext)]
+                if len(path_bytes) > 4 and (b":" in path_bytes or b"/" in path_bytes or b"\\" in path_bytes):
+                    found_paths.append((start_idx_p, path_bytes))
+                idx += len(ext)
+                
+        if not found_paths:
+            print("DEBUG - No existing path found in binary data to replace", flush=True)
+            return raw_state_b64
+            
+        # Replace the first matching path
+        target_idx, old_path_bytes = found_paths[0]
+        prefix_idx = target_idx - 4
+        if prefix_idx >= 0:
+            old_len = int.from_bytes(binary_data[prefix_idx:target_idx], 'little')
+            if old_len == len(old_path_bytes):
+                new_path_bytes = new_path.encode('utf-8')
+                new_len_bytes = len(new_path_bytes).to_bytes(4, 'little')
+                
+                new_binary_data = (
+                    binary_data[:prefix_idx] +
+                    new_len_bytes +
+                    new_path_bytes +
+                    binary_data[target_idx + len(old_path_bytes):]
+                )
+                
+                # JUCE encode
+                s_new_std = base64.b64encode(new_binary_data).decode('utf-8')
+                new_icomponent_b64 = s_new_std.replace('+', '.').replace('/', '-').replace('=', '')
+                
+                new_raw_state = (
+                    raw_state[:start_idx + len(start_tag)] +
+                    new_icomponent_b64.encode('utf-8') +
+                    raw_state[end_idx:]
+                )
+                return base64.b64encode(new_raw_state).decode('utf-8')
+    except Exception as e:
+        print(f"Error patching VST state: {e}", flush=True)
+    return raw_state_b64
+
+def set_vst_param_value(vst, param_name, value):
+    try:
+        if hasattr(vst, 'parameters') and param_name in vst.parameters:
+            p = vst.parameters[param_name]
+            # Try setting .value directly on the parameter object
+            try:
+                p.value = value
+                print(f"DEBUG - set_vst_param_value successful using p.value for {param_name}", flush=True)
+                return
+            except Exception as e_val:
+                print(f"DEBUG - p.value failed for {param_name}: {e_val}", flush=True)
+                pass
+            # Try setting .raw_value (normalized)
+            try:
+                min_v = getattr(p, "min_value", 0.0)
+                max_v = getattr(p, "max_value", 1.0)
+                if min_v is not None and max_v is not None and max_v > min_v:
+                    norm = (value - min_v) / (max_v - min_v)
+                    p.raw_value = max(0.0, min(1.0, norm))
+                    print(f"DEBUG - set_vst_param_value successful using p.raw_value for {param_name}", flush=True)
+                    return
+            except Exception as e_raw:
+                print(f"DEBUG - p.raw_value failed for {param_name}: {e_raw}", flush=True)
+                pass
+                
+        # Fallback to setting as attribute on VST object
+        try:
+            setattr(vst, param_name, value)
+            print(f"DEBUG - set_vst_param_value successful using setattr(exact) for {param_name}", flush=True)
+            return
+        except Exception as e_exact:
+            print(f"DEBUG - setattr(exact) failed for {param_name}: {e_exact}", flush=True)
+            pass
+        try:
+            attr_name = param_name.lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
+            setattr(vst, attr_name, value)
+            print(f"DEBUG - set_vst_param_value successful using setattr(clean: {attr_name}) for {param_name}", flush=True)
+            return
+        except Exception as e_clean:
+            print(f"DEBUG - setattr(clean) failed for {param_name}: {e_clean}", flush=True)
+            pass
+    except Exception as e:
+        print(f"Error setting VST parameter {param_name} to {value}: {e}", flush=True)
 
 
 class EffectCard(QFrame):
@@ -146,6 +318,7 @@ class EffectCard(QFrame):
         self.is_selected = False
         self.drag_start_position = None
         self.setProperty("selected", False)
+        self.setAcceptDrops(True)
         
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setObjectName("EffectCard")
@@ -153,7 +326,7 @@ class EffectCard(QFrame):
         
         # Calculate responsive width based on parameter/knob count
         num_knobs = 0
-        if self.wrapper.effect_type != "VST3":
+        if self.wrapper.effect_type != "VST3" and self.wrapper.effect_type != "NeuralAmpModeler":
             from project_manager import EFFECT_CLASSES
             if self.wrapper.effect_type in EFFECT_CLASSES:
                 _, params = EFFECT_CLASSES[self.wrapper.effect_type]
@@ -193,7 +366,7 @@ class EffectCard(QFrame):
         
         header.addStretch()
         
-        if self.wrapper.effect_type == "VST3":
+        if self.wrapper.effect_type in ("VST3", "NeuralAmpModeler"):
             self.btn_settings = QPushButton("⚙")
             self.btn_settings.setObjectName("SettingsButton")
             self.btn_settings.setToolTip("Open VST Settings")
@@ -215,8 +388,7 @@ class EffectCard(QFrame):
         body.setSpacing(15)
         
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        if self.wrapper.effect_type != "VST3":
-            # Render custom knobs for built-in effects
+        if self.wrapper.effect_type != "VST3" and self.wrapper.effect_type != "NeuralAmpModeler":
             from project_manager import EFFECT_CLASSES
             if self.wrapper.effect_type in EFFECT_CLASSES:
                 _, params = EFFECT_CLASSES[self.wrapper.effect_type]
@@ -275,12 +447,48 @@ class EffectCard(QFrame):
         layout.addStretch()
         
         # Apply Card Styles
-        self.setStyleSheet("""
+        if self.wrapper.effect_type == "NeuralAmpModeler":
+            card_styles = """
+            EffectCard {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1a1a1c, stop:1 #0c0c0d);
+                border: 1px solid #e06c15;
+                border-radius: 4px;
+            }
+            EffectCard[selected="true"] {
+                border-color: #ffffff;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #222226, stop:1 #121214);
+            }
+            QLabel#EffectNameLabel {
+                color: #e06c15;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 11px;
+                font-weight: bold;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            """
+        else:
+            card_styles = """
             EffectCard {
                 background-color: #0b0b0c;
                 border: 1px solid #222225;
                 border-radius: 4px;
             }
+            EffectCard[selected="true"] {
+                border-color: #ffffff;
+                background-color: #121214;
+            }
+            QLabel#EffectNameLabel {
+                color: #ffffff;
+                font-family: "Consolas", "Courier New", monospace;
+                font-size: 11px;
+                font-weight: bold;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            """
+
+        self.setStyleSheet(card_styles + """
             QPushButton#BypassButton {
                 font-family: "Consolas", "Courier New", monospace;
                 font-weight: bold;
@@ -298,14 +506,6 @@ class EffectCard(QFrame):
                 color: #88888c;
                 background-color: #0b0b0c;
                 border-color: #222225;
-            }
-            QLabel#EffectNameLabel {
-                color: #ffffff;
-                font-family: "Consolas", "Courier New", monospace;
-                font-size: 11px;
-                font-weight: bold;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
             }
             QPushButton#SettingsButton {
                 color: #88888c;
@@ -408,7 +608,7 @@ class EffectCard(QFrame):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.wrapper.effect_type == "VST3":
+            if self.wrapper.effect_type in ("VST3", "NeuralAmpModeler"):
                 self.open_vst_editor()
                 event.accept()
                 return
@@ -492,6 +692,280 @@ class EffectCard(QFrame):
         self.track.effects.remove(self.wrapper)
         self.track.update_pedalboard()
         self.effectChanged.emit()
+
+    def find_nam_param_keys(self):
+        vst = self.wrapper.effect
+        keys = {}
+        if not vst or not hasattr(vst, "parameters"):
+            return keys
+            
+        param_list = list(vst.parameters.keys())
+        print("DEBUG - NAM/Gateway Parameter Keys:", param_list, flush=True)
+        for p in param_list:
+            p_lower = p.lower()
+            if p_lower == "input_db" or p_lower == "input":
+                keys["input"] = p
+            elif p_lower == "output_db" or p_lower == "output":
+                keys["output"] = p
+            elif p_lower == "threshold_db" or p_lower == "threshold" or p_lower == "gate":
+                keys["gate"] = p
+            elif p_lower == "bass":
+                keys["bass"] = p
+            elif p_lower == "middle" or p_lower == "mid":
+                keys["mid"] = p
+            elif p_lower == "treble" or p_lower == "treb":
+                keys["treble"] = p
+        return keys
+
+    def on_vst_param_changed(self, param_name, value):
+        vst = self.wrapper.effect
+        print(f"DEBUG - on_vst_param_changed called for {param_name} with value {value}", flush=True)
+        set_vst_param_value(vst, param_name, value)
+
+    def on_locate_nam_vst3(self):
+        file_filter = "VST3 Plugins (*.vst3)"
+        dlg = QFileDialog(self)
+        dlg.setWindowTitle("Locate NeuralAmpModeler.vst3 File")
+        dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+        dlg.setNameFilter(file_filter)
+        dlg.setDirectory("C:\\Program Files\\Common Files\\VST3")
+        dlg.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        apply_dark_theme_to_hwnd(int(dlg.winId()))
+        
+        if dlg.exec() == QFileDialog.DialogCode.Accepted:
+            file_path = dlg.selectedFiles()[0]
+            if os.path.exists(file_path):
+                try:
+                    from audio_engine import load_vst_plugin
+                    effect_obj = load_vst_plugin(file_path)
+                    
+                    self.wrapper.effect = effect_obj
+                    self.wrapper.original_vst_path = file_path
+                    if hasattr(self.wrapper, "is_vst_missing"):
+                        delattr(self.wrapper, "is_vst_missing")
+                    
+                    # Recalculate card width now that VST is found
+                    num_knobs = 6
+                    card_width = max(250, 30 + num_knobs * 80)
+                    self.setMinimumWidth(card_width)
+                    self.setMaximumWidth(card_width + 30)
+                    
+                    main_window = self.window()
+                    if hasattr(main_window, 'audio_engine') and main_window.audio_engine:
+                        main_window.audio_engine.stop_stream()
+                        self.track.update_pedalboard(main_window.audio_engine.sample_rate)
+                    else:
+                        self.track.update_pedalboard()
+                        
+                    # Re-initialize the UI to draw the knobs
+                    # First clear old layout content
+                    layout = self.layout()
+                    if layout:
+                        # Clear old items
+                        while layout.count():
+                            item = layout.takeAt(0)
+                            widget = item.widget()
+                            if widget:
+                                widget.deleteLater()
+                            else:
+                                # sublayouts, etc.
+                                pass
+                        # Delete the old layout
+                        import sip
+                        sip.delete(layout)
+                    self.setup_ui()
+                    self.refresh_rack()
+                    self.mark_dirty()
+                except Exception as e:
+                    QMessageBox.critical(self, "Load Error", f"Failed to load VST3 from that path: {e}")
+
+    def on_load_amp_clicked(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select NAM Model File", "", "NAM Models (*.nam *.namb);;All Files (*)"
+        )
+        if file_path:
+            import shutil
+            appdata = os.environ.get('APPDATA')
+            if appdata:
+                nam_dir = os.path.join(appdata, "Graphite", "NAM")
+            else:
+                nam_dir = os.path.join(os.path.expanduser('~'), ".graphite", "NAM")
+            os.makedirs(nam_dir, exist_ok=True)
+            
+            dest_path = os.path.join(nam_dir, "active_model.nam")
+            try:
+                # Copy file
+                shutil.copy2(file_path, dest_path)
+                
+                # Save details
+                self.wrapper.loaded_model_name = os.path.basename(file_path)
+                self.lbl_amp_file.setText(self.wrapper.loaded_model_name)
+                
+                # Reload VST3
+                self.reload_vst_and_reapply_state()
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"Could not copy NAM model: {e}")
+
+    def on_load_ir_clicked(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Cabinet IR WAV File", "", "WAV Files (*.wav);;All Files (*)"
+        )
+        if file_path:
+            import shutil
+            appdata = os.environ.get('APPDATA')
+            if appdata:
+                nam_dir = os.path.join(appdata, "Graphite", "NAM")
+            else:
+                nam_dir = os.path.join(os.path.expanduser('~'), ".graphite", "NAM")
+            os.makedirs(nam_dir, exist_ok=True)
+            
+            dest_path = os.path.join(nam_dir, "active_ir.wav")
+            try:
+                # Copy file
+                shutil.copy2(file_path, dest_path)
+                
+                # Save details
+                self.wrapper.loaded_ir_name = os.path.basename(file_path)
+                self.lbl_ir_file.setText(self.wrapper.loaded_ir_name)
+                
+                # Reload VST3
+                self.reload_vst_and_reapply_state()
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"Could not copy Cabinet IR: {e}")
+
+    def reload_vst_and_reapply_state(self):
+        vst = self.wrapper.effect
+        if not vst or not hasattr(vst, "raw_state"):
+            return
+            
+        try:
+            # Re-read or get the current state
+            state = vst.raw_state
+            
+            # Recreate VST3 instance using the original VST path
+            if getattr(self.wrapper, "original_vst_path", ""):
+                from audio_engine import load_vst_plugin
+                new_vst = load_vst_plugin(self.wrapper.original_vst_path)
+                
+                # Set raw state to force the new files to load
+                new_vst.raw_state = state
+                self.wrapper.effect = new_vst
+                
+                # Restart stream if needed to update audio processing
+                main_win = self.window()
+                if hasattr(main_win, 'audio_engine') and main_win.audio_engine:
+                    main_win.audio_engine.stop_stream()
+                    self.track.update_pedalboard(main_win.audio_engine.sample_rate)
+                    main_win.audio_engine.start_stream()
+                else:
+                    self.track.update_pedalboard()
+                    
+                QMessageBox.information(
+                    self, 
+                    "Model Loaded", 
+                    "File copied successfully!\n\n"
+                    "If this is your first time loading a model or IR, click 'OPEN EDITOR' and load the files:\n"
+                    "- 'active_model.nam'\n"
+                    "- 'active_ir.wav'\n"
+                    "located in AppData/Local/Graphite/NAM.\n\n"
+                    "Subsequent loads from the card will update automatically without opening the editor!"
+                )
+        except Exception as e:
+            print(f"Error reloading NAM/Gateway VST: {e}")
+
+    def load_amp_model_path(self, file_path):
+        import shutil
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            nam_dir = os.path.join(appdata, "Graphite", "NAM")
+        else:
+            nam_dir = os.path.join(os.path.expanduser('~'), ".graphite", "NAM")
+        os.makedirs(nam_dir, exist_ok=True)
+        
+        dest_path = os.path.join(nam_dir, "active_model.nam")
+        try:
+            shutil.copy2(file_path, dest_path)
+            self.wrapper.loaded_model_name = os.path.basename(file_path)
+            self.lbl_amp_file.setText(self.wrapper.loaded_model_name)
+            
+            # Patch VST state with the new path
+            vst = self.wrapper.effect
+            if vst and hasattr(vst, "raw_state"):
+                import base64
+                raw_b64 = base64.b64encode(vst.raw_state).decode('utf-8')
+                patched_b64 = patch_nam_vst_state(raw_b64, dest_path, is_ir=False)
+                vst.raw_state = base64.b64decode(patched_b64)
+                
+            self.reload_vst_and_reapply_state()
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Could not copy NAM model: {e}")
+
+    def load_ir_path(self, file_path):
+        import shutil
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            nam_dir = os.path.join(appdata, "Graphite", "NAM")
+        else:
+            nam_dir = os.path.join(os.path.expanduser('~'), ".graphite", "NAM")
+        os.makedirs(nam_dir, exist_ok=True)
+        
+        dest_path = os.path.join(nam_dir, "active_ir.wav")
+        try:
+            shutil.copy2(file_path, dest_path)
+            self.wrapper.loaded_ir_name = os.path.basename(file_path)
+            self.lbl_ir_file.setText(self.wrapper.loaded_ir_name)
+            
+            # Patch VST state with the new path
+            vst = self.wrapper.effect
+            if vst and hasattr(vst, "raw_state"):
+                import base64
+                raw_b64 = base64.b64encode(vst.raw_state).decode('utf-8')
+                patched_b64 = patch_nam_vst_state(raw_b64, dest_path, is_ir=True)
+                vst.raw_state = base64.b64decode(patched_b64)
+                
+            self.reload_vst_and_reapply_state()
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Could not copy Cabinet IR: {e}")
+
+    def on_load_amp_clicked(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select NAM Model File", "", "NAM Models (*.nam *.namb);;All Files (*)"
+        )
+        if file_path:
+            self.load_amp_model_path(file_path)
+
+    def on_load_ir_clicked(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Cabinet IR WAV File", "", "WAV Files (*.wav);;All Files (*)"
+        )
+        if file_path:
+            self.load_ir_path(file_path)
+
+    def dragEnterEvent(self, event):
+        if self.wrapper.effect_type == "NeuralAmpModeler" and event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                if file_path.lower().endswith(('.nam', '.namb', '.wav')):
+                    event.acceptProposedAction()
+                    return
+        super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        if self.wrapper.effect_type == "NeuralAmpModeler" and event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if urls:
+                file_path = urls[0].toLocalFile()
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ('.nam', '.namb'):
+                    self.load_amp_model_path(file_path)
+                    event.acceptProposedAction()
+                    return
+                elif ext == '.wav':
+                    self.load_ir_path(file_path)
+                    event.acceptProposedAction()
+                    return
+        super().dropEvent(event)
 
 class EffectsContainer(QWidget):
     def __init__(self, effects_rack, parent=None):
@@ -898,6 +1372,7 @@ class EffectsRack(QWidget):
         if main_win and hasattr(main_win, 'undo_manager'):
             main_win.undo_manager.push_state(f"Add {display_name}")
         effect_obj = None
+        vst_path = None
         try:
             if fx_type == "NoiseGate":
                 effect_obj = NoiseGate(threshold_db=-45, ratio=10, attack_ms=1.5, release_ms=80.0)
@@ -919,6 +1394,15 @@ class EffectsRack(QWidget):
                 effect_obj = LowpassFilter(cutoff_frequency_hz=1500)
             elif fx_type == "HighpassFilter":
                 effect_obj = HighpassFilter(cutoff_frequency_hz=80)
+            elif fx_type == "NeuralAmpModeler":
+                search_paths = getattr(self.audio_engine, "vst_search_paths", ["C:\\Program Files\\Common Files\\VST3"])
+                vst_path = find_nam_vst3(search_paths, self.audio_engine)
+                if vst_path:
+                    from audio_engine import load_vst_plugin
+                    effect_obj = load_vst_plugin(vst_path)
+                else:
+                    from pedalboard import Gain
+                    effect_obj = Gain(gain_db=0.0)
         except Exception as e:
             main_window = self.window()
             if hasattr(main_window, 'show_themed_message_box'):
@@ -929,6 +1413,10 @@ class EffectsRack(QWidget):
             
         if effect_obj:
             wrapper = EffectWrapper(effect_obj, display_name, fx_type, is_active=True)
+            if fx_type == "NeuralAmpModeler":
+                wrapper.original_vst_path = vst_path if vst_path else ""
+                if not vst_path:
+                    wrapper.is_vst_missing = True
             self.selected_track.effects.append(wrapper)
             try:
                 self.selected_track.update_pedalboard(self.audio_engine.sample_rate if self.audio_engine else 44100)

@@ -591,6 +591,7 @@ class AudioEngine:
         self.guitar_loop_idx = 0
         self.vst_search_paths = ["C:\\Program Files\\Common Files\\VST3"]
         self.startup_project_path = ""
+        self.nam_vst_path = ""
         self.lock = threading.RLock()
         self.tuner_buffer = TunerBuffer(8192)
         self.selected_track_id = 1
@@ -687,7 +688,8 @@ class AudioEngine:
                 "allow_project_override_sr": self.allow_project_override_sr,
                 "thread_priority": self.thread_priority,
                 "vst_search_paths": self.vst_search_paths,
-                "startup_project_path": self.startup_project_path
+                "startup_project_path": self.startup_project_path,
+                "nam_vst_path": getattr(self, "nam_vst_path", "")
             }
             with open(settings_path, "w") as f:
                 json.dump(settings_data, f, indent=4)
@@ -721,6 +723,7 @@ class AudioEngine:
             self.thread_priority = data.get("thread_priority", self.thread_priority)
             self.vst_search_paths = data.get("vst_search_paths", ["C:\\Program Files\\Common Files\\VST3"])
             self.startup_project_path = data.get("startup_project_path", "")
+            self.nam_vst_path = data.get("nam_vst_path", "")
         except Exception as e:
             print(f"Failed to load audio settings: {e}")
             
@@ -1541,12 +1544,33 @@ def clean_temp_vsts():
             pass
         _temp_vst_dir = None
 
+def resolve_vst_path(path):
+    if not path:
+        return path
+    import os
+    if os.path.isdir(path):
+        # Check standard Windows VST3 bundle location
+        contents_path = os.path.join(path, "Contents", "x86_64-win")
+        if os.path.exists(contents_path):
+            for f in os.listdir(contents_path):
+                if f.lower().endswith('.vst3') or f.lower().endswith('.dll'):
+                    return os.path.join(contents_path, f)
+        # Fallback recursive search inside the directory
+        for root, dirs, files in os.walk(path):
+            for f in files:
+                if f.lower().endswith('.vst3') or f.lower().endswith('.dll'):
+                    fp = os.path.join(root, f)
+                    if os.path.isfile(fp):
+                        return fp
+    return path
+
 def load_vst_plugin(vst_path):
     """Loads a VST plugin directly from its path."""
     import os
     from pedalboard import load_plugin
     
-    if not os.path.exists(vst_path):
-        raise FileNotFoundError(f"VST plugin not found: {vst_path}")
+    resolved_path = resolve_vst_path(vst_path)
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"VST plugin not found: {resolved_path}")
         
-    return load_plugin(vst_path)
+    return load_plugin(resolved_path)

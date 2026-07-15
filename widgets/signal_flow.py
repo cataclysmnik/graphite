@@ -168,7 +168,7 @@ class SignalFlowNode(QFrame):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.wrapper.effect_type == "VST3":
+            if self.wrapper.effect_type in ("VST3", "NeuralAmpModeler"):
                 rack = self.flow_widget.effects_rack
                 for i in range(rack.scroll_layout.count()):
                     item = rack.scroll_layout.itemAt(i)

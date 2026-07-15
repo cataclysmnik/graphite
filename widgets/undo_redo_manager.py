@@ -103,7 +103,7 @@ class UndoRedoManager:
                     if fx.effect_type != fx_data["effect_type"]:
                         need_hard_reset = True
                         break
-                    if fx.effect_type == "VST3":
+                    if fx.effect_type in ("VST3", "NeuralAmpModeler"):
                         existing_path = getattr(fx, "original_vst_path", "")
                         snap_path = fx_data.get("vst_path", "")
                         if existing_path != snap_path:
@@ -170,7 +170,7 @@ class UndoRedoManager:
                             fx.mix = fx_data.get("mix", 1.0)
                             fx.gain_db = fx_data.get("gain_db", 0.0)
                             
-                            if fx.effect_type == "VST3" and "raw_state" in fx_data:
+                            if fx.effect_type in ("VST3", "NeuralAmpModeler") and "raw_state" in fx_data:
                                 try:
                                     raw_state_b64 = fx_data.get("raw_state", "")
                                     if raw_state_b64:

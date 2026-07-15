@@ -294,6 +294,41 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
         
         content_layout.addWidget(startup_group)
 
+        # --- NAM / GATEWAY VST3 PATH GROUP BOX ---
+        nam_group = QGroupBox("Neural Amp Modeler / Gateway VST3 plugin file")
+        nam_group.setObjectName("StartupGroupBox")
+        nam_layout = QHBoxLayout(nam_group)
+        nam_layout.setContentsMargins(15, 15, 15, 15)
+        nam_layout.setSpacing(10)
+        
+        self.edit_nam_vst_path = QLineEdit()
+        self.edit_nam_vst_path.setObjectName("StartupPathEdit")
+        self.edit_nam_vst_path.setReadOnly(True)
+        self.edit_nam_vst_path.setPlaceholderText("No custom NeuralAmpModeler / Gateway VST3 path set (will auto-scan)")
+        self.edit_nam_vst_path.setStyleSheet("""
+            QLineEdit#StartupPathEdit {
+                background-color: #000000;
+                border: 1px solid #333333;
+                color: #ffffff;
+                padding: 4px 8px;
+                font-family: "Consolas", monospace;
+                font-size: 11px;
+            }
+        """)
+        nam_layout.addWidget(self.edit_nam_vst_path, 1)
+        
+        self.btn_browse_nam_vst = QPushButton("Browse...")
+        self.btn_browse_nam_vst.setObjectName("VstPathButton")
+        self.btn_browse_nam_vst.clicked.connect(self.on_browse_nam_vst_path)
+        nam_layout.addWidget(self.btn_browse_nam_vst)
+        
+        self.btn_clear_nam_vst = QPushButton("Clear")
+        self.btn_clear_nam_vst.setObjectName("VstPathButton")
+        self.btn_clear_nam_vst.clicked.connect(self.on_clear_nam_vst_path)
+        nam_layout.addWidget(self.btn_clear_nam_vst)
+        
+        content_layout.addWidget(nam_group)
+
         # OK / CANCEL BUTTONS (outside scroll area)
         buttons_widget = QWidget(self)
         buttons_layout = QHBoxLayout(buttons_widget)
@@ -499,6 +534,9 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
             
         # Load startup project path
         self.edit_startup_path.setText(getattr(self.audio_engine, "startup_project_path", ""))
+        
+        # Load NAM VST path
+        self.edit_nam_vst_path.setText(getattr(self.audio_engine, "nam_vst_path", ""))
             
     def on_system_changed(self):
         """Switches visual layout based on host API (ASIO vs. standard)."""
@@ -765,6 +803,9 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
         # Save startup project path
         self.audio_engine.startup_project_path = self.edit_startup_path.text()
         
+        # Save NAM VST path
+        self.audio_engine.nam_vst_path = self.edit_nam_vst_path.text()
+        
         # Apply changes and restart stream
         was_running = self.audio_engine.is_running
         success = self.audio_engine.start_stream()
@@ -801,3 +842,13 @@ class AudioSettingsDialog(FramelessWindowMixin, QDialog):
 
     def on_clear_startup_project(self):
         self.edit_startup_path.clear()
+
+    def on_browse_nam_vst_path(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select NeuralAmpModeler / Gateway VST3 Plugin File", "", "VST3 Plugins (*.vst3);;All Files (*)"
+        )
+        if file_path:
+            self.edit_nam_vst_path.setText(file_path)
+
+    def on_clear_nam_vst_path(self):
+        self.edit_nam_vst_path.clear()
