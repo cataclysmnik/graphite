@@ -6,8 +6,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QFileDialog, QMessageBox, QFrame,
     QPushButton, QLabel
 )
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint, QSize, QEvent
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QIcon
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QPoint, QSize, QEvent, QTimer
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QIcon, QCursor
 from audio_engine import AudioItem
 def get_event_position(event):
     """Safely extracts the position from a QDropEvent, QDragMoveEvent, or QMouseEvent in Qt6/PySide6."""
@@ -265,6 +265,12 @@ class TimelineLanesWidget(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAcceptDrops(True)
+        
+        # Setup auto-scroll timer for dragging/selecting near edges
+        self.auto_scroll_timer = QTimer(self)
+        self.auto_scroll_timer.setInterval(30)
+        self.auto_scroll_timer.timeout.connect(self.handle_auto_scroll)
+        self.scroll_area = None
         
     def set_zoom(self, pixels_per_second):
         self.pixels_per_second = pixels_per_second
@@ -952,6 +958,41 @@ class TimelineLanesWidget(QWidget):
             self.timeClicked.emit(time_seconds)
             self.update()
             
+        # Start auto-scroll timer if dragging, swipe-comping, or box selecting
+        if (self.active_drag_item or self.comp_swipe_item or 
+            getattr(self, 'right_swipe_item', None) or self.box_select_start is not None):
+            self.auto_scroll_timer.start()
+
+    def handle_auto_scroll(self):
+        if not self.scroll_area:
+            return
+            
+        # Get mouse position relative to lanes widget
+        mouse_pos = self.mapFromGlobal(QCursor.pos())
+        # Map to scroll area's viewport
+        viewport = self.scroll_area.viewport()
+        pos_in_viewport = viewport.mapFrom(self, mouse_pos)
+        
+        viewport_w = viewport.width()
+        margin = 50
+        scroll_delta = 0
+        
+        if pos_in_viewport.x() < margin:
+            diff = margin - pos_in_viewport.x()
+            scroll_delta = - (int(diff * 0.4) + 2)
+        elif pos_in_viewport.x() > viewport_w - margin:
+            diff = pos_in_viewport.x() - (viewport_w - margin)
+            scroll_delta = int(diff * 0.4) + 2
+            
+        if scroll_delta != 0:
+            scrollbar = self.scroll_area.horizontalScrollBar()
+            new_val = max(scrollbar.minimum(), min(scrollbar.value() + scroll_delta, scrollbar.maximum()))
+            if new_val != scrollbar.value():
+                scrollbar.setValue(new_val)
+                # After scrolling, the mouse's absolute position relative to self changes.
+                refreshed_pos = self.mapFromGlobal(QCursor.pos())
+                self.handle_drag_move(refreshed_pos.x(), refreshed_pos.y())
+
     def apply_comp_range(self, item, start_s, end_s, take_idx):
         new_ranges = []
         for r_start, r_end, r_take in item.comp_ranges:
@@ -1013,10 +1054,9 @@ class TimelineLanesWidget(QWidget):
         item.update_cached_comp_data()
 
     def mouseMoveEvent(self, event):
-        x = event.position().x()
-        y = event.position().y()
-        
-            
+        self.handle_drag_move(event.position().x(), event.position().y())
+
+    def handle_drag_move(self, x, y):
         # Handle active right swipe comp de-selection
         if getattr(self, 'right_swipe_item', None) is not None:
             current_s = int((x / self.pixels_per_second) * self.audio_engine.sample_rate)
@@ -1066,7 +1106,7 @@ class TimelineLanesWidget(QWidget):
                         self.active_drag_item[1] = new_start + self.drag_length_samples
                     
                 # Shift clip/region between tracks when dragging vertically
-                target_track_idx = 0
+                target_track_idx = -1
                 y_curr = 0
                 for idx, t in enumerate(self.audio_engine.tracks):
                     h_track = self.get_track_height(t)
@@ -1074,24 +1114,32 @@ class TimelineLanesWidget(QWidget):
                         target_track_idx = idx
                         break
                     y_curr += h_track
-                target_track_idx = max(0, min(len(self.audio_engine.tracks) - 1, target_track_idx))
-                target_track = self.audio_engine.tracks[target_track_idx]
-                if target_track != self.drag_track:
-                    if target_type == "item":
-                        with self.drag_track.lock:
-                            if self.active_drag_item in self.drag_track.items:
-                                self.drag_track.items.remove(self.active_drag_item)
-                        self.audio_engine.add_item_to_track(target_track, self.active_drag_item)
-                    else: # arm_region
-                        with self.drag_track.lock:
-                            if self.active_drag_item in getattr(self.drag_track, "arm_regions", []):
-                                self.drag_track.arm_regions.remove(self.active_drag_item)
-                        with target_track.lock:
-                            if not hasattr(target_track, "arm_regions"):
-                                target_track.arm_regions = []
-                            target_track.arm_regions.append(self.active_drag_item)
-                    self.drag_track = target_track
-                    self.selected_track_for_item = target_track
+                    
+                # If dragging below the last track, dynamically create a new track
+                if target_track_idx == -1 and y >= y_curr:
+                    new_track = self.audio_engine.add_track(f"Track {len(self.audio_engine.tracks) + 1}")
+                    if hasattr(self, 'main_window') and self.main_window:
+                        self.main_window.refresh_track_cards()
+                    target_track_idx = len(self.audio_engine.tracks) - 1
+                    
+                if target_track_idx != -1:
+                    target_track = self.audio_engine.tracks[target_track_idx]
+                    if target_track != self.drag_track:
+                        if target_type == "item":
+                            with self.drag_track.lock:
+                                if self.active_drag_item in self.drag_track.items:
+                                    self.drag_track.items.remove(self.active_drag_item)
+                            self.audio_engine.add_item_to_track(target_track, self.active_drag_item)
+                        else: # arm_region
+                            with self.drag_track.lock:
+                                if self.active_drag_item in getattr(self.drag_track, "arm_regions", []):
+                                    self.drag_track.arm_regions.remove(self.active_drag_item)
+                            with target_track.lock:
+                                if not hasattr(target_track, "arm_regions"):
+                                    target_track.arm_regions = []
+                                target_track.arm_regions.append(self.active_drag_item)
+                        self.drag_track = target_track
+                        self.selected_track_for_item = target_track
             
             elif self.active_drag_mode == "resize_left":
                 timeline_end = self.drag_start_sample + self.drag_length_samples
@@ -1220,6 +1268,7 @@ class TimelineLanesWidget(QWidget):
                 
 
     def mouseReleaseEvent(self, event):
+        self.auto_scroll_timer.stop()
         if getattr(self, 'right_swipe_item', None) is not None:
             self.right_swipe_item.update_cached_comp_data()
             self.right_swipe_item = None
@@ -2097,6 +2146,210 @@ class TimelineScrollArea(QScrollArea):
             super().dropEvent(event)
 
 
+class ZoomScrollBar(QWidget):
+    """Custom horizontal scrollbar that supports edge-dragging to zoom."""
+    def __init__(self, container, parent=None):
+        super().__init__(parent)
+        self.container = container
+        self.setFixedHeight(16)
+        
+        self.drag_mode = None  # None, "scroll", "zoom_left", "zoom_right"
+        self.drag_start_x = 0
+        self.drag_start_left = 0
+        self.drag_start_right = 0
+        
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        # Style colors
+        self.color_bg = QColor("#09090a")
+        self.color_border = QColor("#222225")
+        self.color_thumb = QColor(255, 255, 255, 20)
+        self.color_thumb_hover = QColor(255, 255, 255, 35)
+        self.color_thumb_drag = QColor(255, 255, 255, 50)
+        self.color_handle = QColor("#66666a")
+        self.color_handle_hover = QColor("#a0a0a5")
+        
+        self.is_hovered = False
+        self.hover_part = None  # "left", "right", "center"
+        
+    def get_thumb_coords(self):
+        W_sb = self.width()
+        lanes = self.container.lanes
+        scroll_area = self.container.scroll_area
+        
+        total_width = lanes.width()
+        viewport_width = scroll_area.viewport().width()
+        
+        if total_width <= viewport_width:
+            return 0, W_sb
+            
+        scroll_val = scroll_area.horizontalScrollBar().value()
+        
+        left_x = (scroll_val / total_width) * W_sb
+        right_x = ((scroll_val + viewport_width) / total_width) * W_sb
+        
+        # Ensure at least 15 pixels of width
+        if right_x - left_x < 15:
+            right_x = left_x + 15
+            if right_x > W_sb:
+                right_x = W_sb
+                left_x = W_sb - 15
+                
+        return left_x, right_x
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            x = event.position().x()
+            left_x, right_x = self.get_thumb_coords()
+            margin = 6
+            
+            if abs(x - left_x) <= margin:
+                self.drag_mode = "zoom_left"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif abs(x - right_x) <= margin:
+                self.drag_mode = "zoom_right"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif left_x < x < right_x:
+                self.drag_mode = "scroll"
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            else:
+                # Center the thumb on click if clicked outside thumb
+                self.drag_mode = "scroll"
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                thumb_w = right_x - left_x
+                new_left = x - thumb_w / 2
+                self.apply_scroll(new_left)
+                left_x, right_x = self.get_thumb_coords()
+                
+            self.drag_start_x = x
+            self.drag_start_left = left_x
+            self.drag_start_right = right_x
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        x = event.position().x()
+        left_x, right_x = self.get_thumb_coords()
+        margin = 6
+        
+        if self.drag_mode is None:
+            if abs(x - left_x) <= margin or abs(x - right_x) <= margin:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+                if abs(x - left_x) <= margin:
+                    self.hover_part = "left"
+                else:
+                    self.hover_part = "right"
+            elif left_x < x < right_x:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                self.hover_part = "center"
+            else:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                self.hover_part = None
+            self.update()
+            return
+            
+        dx = x - self.drag_start_x
+        W_sb = self.width()
+        
+        if self.drag_mode == "scroll":
+            new_left = self.drag_start_left + dx
+            self.apply_scroll(new_left)
+        elif self.drag_mode == "zoom_left":
+            new_left = self.drag_start_left + dx
+            new_left = max(0, min(new_left, right_x - 15))
+            self.apply_zoom(new_left, right_x)
+        elif self.drag_mode == "zoom_right":
+            new_right = self.drag_start_right + dx
+            new_right = max(left_x + 15, min(new_right, W_sb))
+            self.apply_zoom(left_x, new_right)
+            
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        self.drag_mode = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+        
+    def enterEvent(self, event):
+        self.is_hovered = True
+        self.update()
+        
+    def leaveEvent(self, event):
+        self.is_hovered = False
+        self.hover_part = None
+        self.update()
+
+    def apply_scroll(self, left_x):
+        W_sb = self.width()
+        lanes = self.container.lanes
+        scroll_area = self.container.scroll_area
+        
+        total_width = lanes.width()
+        viewport_width = scroll_area.viewport().width()
+        
+        if total_width <= viewport_width:
+            return
+            
+        frac = left_x / W_sb
+        max_left_frac = (total_width - viewport_width) / total_width
+        frac = max(0.0, min(frac, max_left_frac))
+        
+        new_scroll = int(frac * total_width)
+        scroll_area.horizontalScrollBar().setValue(new_scroll)
+        
+    def apply_zoom(self, left_x, right_x):
+        W_sb = self.width()
+        lanes = self.container.lanes
+        scroll_area = self.container.scroll_area
+        viewport_width = scroll_area.viewport().width()
+        
+        total_duration = lanes.width() / self.container.pixels_per_second
+        
+        new_f_start = left_x / W_sb
+        new_f_end = right_x / W_sb
+        df = new_f_end - new_f_start
+        if df <= 0:
+            return
+            
+        new_zoom = viewport_width / (df * total_duration)
+        self.container.zoom_horizontal_to(new_zoom, new_f_start)
+        
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            W_sb = self.width()
+            H_sb = self.height()
+            
+            painter.fillRect(0, 0, W_sb, H_sb, self.color_bg)
+            painter.setPen(QPen(self.color_border, 1))
+            painter.drawRect(0, 0, W_sb - 1, H_sb - 1)
+            
+            left_x, right_x = self.get_thumb_coords()
+            thumb_w = right_x - left_x
+            
+            if self.drag_mode:
+                thumb_color = self.color_thumb_drag
+            elif self.is_hovered and self.hover_part == "center":
+                thumb_color = self.color_thumb_hover
+            else:
+                thumb_color = self.color_thumb
+                
+            rect_thumb = QRectF(left_x, 1, thumb_w, H_sb - 2)
+            painter.fillRect(rect_thumb, thumb_color)
+            painter.setPen(QPen(self.color_border, 1))
+            painter.drawRect(rect_thumb)
+            
+            handle_w = 4
+            color_l = self.color_handle_hover if (self.is_hovered and self.hover_part == "left") or self.drag_mode == "zoom_left" else self.color_handle
+            painter.fillRect(QRectF(left_x, 2, handle_w, H_sb - 4), color_l)
+            
+            color_r = self.color_handle_hover if (self.is_hovered and self.hover_part == "right") or self.drag_mode == "zoom_right" else self.color_handle
+            painter.fillRect(QRectF(right_x - handle_w, 2, handle_w, H_sb - 4), color_r)
+        finally:
+            painter.end()
+
+
 class TimelineScrollContainer(QWidget):
     """Integrates the ruler, lanes scrollarea, and coordinates scroll updates."""
     def __init__(self, audio_engine, parent=None):
@@ -2220,19 +2473,25 @@ class TimelineScrollContainer(QWidget):
         self.scroll_area.setObjectName("TimelineScrollArea")
         self.scroll_area.setWidgetResizable(False)  # Let Lanes Widget set its size
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         self.lanes = TimelineLanesWidget(self.audio_engine, self.scroll_area)
         self.lanes.main_window = self.main_window
+        self.lanes.scroll_area = self.scroll_area
         self.lanes.set_zoom(self.pixels_per_second)
         self.lanes.ruler = self.ruler
         self.ruler.lanes = self.lanes
         self.scroll_area.setWidget(self.lanes)
         layout.addWidget(self.scroll_area)
         
-        # 4. Signals connections
+        # 4. Custom scrollbar at the bottom
+        self.scrollbar = ZoomScrollBar(self)
+        layout.addWidget(self.scrollbar)
+        
+        # 5. Signals connections
         self.scroll_area.horizontalScrollBar().valueChanged.connect(self.ruler.set_scroll_offset)
+        self.scroll_area.horizontalScrollBar().valueChanged.connect(self.scrollbar.update)
         
         self.ruler.timeClicked.connect(self.set_playhead_pos)
         self.ruler.zoomChanged.connect(self.zoom_horizontal)
@@ -2263,6 +2522,24 @@ class TimelineScrollContainer(QWidget):
         self.ruler.set_zoom(new_zoom)
         self.lanes.set_zoom(new_zoom)
         self.lanes.update_geometry()
+        self.scrollbar.update()
+        
+    def zoom_horizontal_to(self, new_zoom, new_f_start):
+        new_zoom = max(5.0, min(new_zoom, 1200.0))  # Clamp zoom
+        self.pixels_per_second = new_zoom
+        
+        # Propagate zoom to widgets
+        self.ruler.set_zoom(new_zoom)
+        self.lanes.set_zoom(new_zoom)
+        self.lanes.update_geometry()
+        
+        # Update horizontal scrollbar to align with the zoom focus point
+        total_width = self.lanes.width()
+        new_scroll = int(new_f_start * total_width)
+        self.scroll_area.horizontalScrollBar().setValue(new_scroll)
+        
+        self.scrollbar.update()
+        self.update()
         
     def update_widgets(self):
         # 1. Update time counter text label
