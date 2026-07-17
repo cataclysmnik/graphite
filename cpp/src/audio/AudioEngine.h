@@ -40,6 +40,8 @@ public:
     float getTrackPeakL(int trackIndex) const;
     float getTrackPeakR(int trackIndex) const;
     
+    std::vector<Track> getTracksSnapshot() const;
+    
     // Plugin Management getters for UI
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
     void triggerPluginScan() { scanForPlugins(); }
@@ -75,7 +77,7 @@ private:
     
     // Tracks
     std::vector<Track> tracks;
-    std::mutex m_trackMutex;
+    mutable std::mutex m_trackMutex;
     
     // JUCE specific for VST3 hostingagement
     juce::AudioPluginFormatManager pluginFormatManager;

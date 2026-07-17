@@ -80,7 +80,7 @@ AudioEngine::AudioEngine()
         scanForPlugins();
     }
 
-    // Create default tracks
+    // Create default tracks with some dummy audio items for timeline testing
     for (int i = 0; i < 4; ++i) {
         Track t;
         t.id = i;
@@ -88,6 +88,22 @@ AudioEngine::AudioEngine()
         else if (i == 1) t.name = "Rhythm Guitar";
         else if (i == 2) t.name = "Bass";
         else if (i == 3) t.name = "Drums";
+        
+        // Add a few dummy clips
+        AudioItem item1;
+        item1.id = i * 10 + 1;
+        item1.startTimeSecs = i * 2.0; // Staggered start times
+        item1.durationSecs = 5.0 + i;
+        item1.offsetSecs = 0.0;
+        t.items.push_back(item1);
+        
+        AudioItem item2;
+        item2.id = i * 10 + 2;
+        item2.startTimeSecs = i * 2.0 + 8.0;
+        item2.durationSecs = 3.0;
+        item2.offsetSecs = 0.0;
+        t.items.push_back(item2);
+        
         tracks.push_back(std::move(t));
     }
 }
@@ -504,10 +520,38 @@ float AudioEngine::getTrackPeakL(int trackIndex) const
 
 float AudioEngine::getTrackPeakR(int trackIndex) const
 {
+    std::lock_guard<std::mutex> lock(m_trackMutex);
     if (trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakR;
     }
     return 0.0f;
+}
+
+std::vector<Track> AudioEngine::getTracksSnapshot() const
+{
+    std::lock_guard<std::mutex> lock(m_trackMutex);
+    
+    // We cannot copy std::unique_ptr<juce::AudioProcessor>, so we need to manually copy the tracks
+    // ignoring the plugin chain (since Timeline doesn't need plugins)
+    std::vector<Track> snapshot;
+    snapshot.reserve(tracks.size());
+    for (const auto& t : tracks) {
+        Track copy;
+        copy.id = t.id;
+        copy.name = t.name;
+        copy.volume = t.volume;
+        copy.pan = t.pan;
+        copy.isMuted = t.isMuted;
+        copy.isSolo = t.isSolo;
+        copy.isArmed = t.isArmed;
+        copy.isSelected = t.isSelected;
+        copy.peakL = t.peakL;
+        copy.peakR = t.peakR;
+        copy.items = t.items;
+        // plugins vector remains empty
+        snapshot.push_back(std::move(copy));
+    }
+    return snapshot;
 }
 
 } // namespace dsp

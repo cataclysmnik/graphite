@@ -37,6 +37,9 @@ public:
 
     void setZoom(double pixelsPerSecond);
     
+signals:
+    void requestScroll(int playheadX);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
 
@@ -61,6 +64,7 @@ public:
 
 private slots:
     void onHorizontalScroll(int value);
+    void onScrollRequested(int playheadX);
 
 private:
     TimeRulerWidget* m_ruler;

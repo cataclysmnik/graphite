@@ -109,6 +109,11 @@ void TimelineLanesWidget::onPlayheadTimerTick()
         double currentPlayhead = m_engine->getPlayheadTime();
         if (currentPlayhead != m_lastPlayheadTime) {
             m_lastPlayheadTime = currentPlayhead;
+            
+            // Emit scroll request so container can follow
+            int playheadX = currentPlayhead * m_pixelsPerSecond;
+            emit requestScroll(playheadX);
+            
             update(); // Repaint the playhead
         }
     }
@@ -133,21 +138,67 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
         painter.drawLine(x, 0, x, h);
     }
     
-    // Draw Track Lane separators (placeholder height = 100px)
-    painter.setPen(QPen(QColor("#222225"), 1));
-    for (int y = 100; y < h; y += 100) {
-        painter.drawLine(0, y, w, y);
+    // Draw Track Lanes and Clips dynamically
+    if (m_engine) {
+        auto tracks = m_engine->getTracksSnapshot();
+        
+        // Dynamically set height if tracks exist
+        int expectedHeight = tracks.size() * 104; // 100px TrackCard + 4px margin
+        if (expectedHeight > 0 && expectedHeight != minimumHeight()) {
+            setMinimumHeight(expectedHeight);
+        }
+        
+        painter.setPen(QPen(QColor("#222225"), 1));
+        
+        int yOffset = 0;
+        int trackHeight = 100;
+        int trackMargin = 4;
+        
+        // Base colors for tracks to make them distinct
+        QColor trackColors[] = {
+            QColor(0, 150, 255),    // Blue
+            QColor(255, 100, 0),    // Orange
+            QColor(0, 200, 100),    // Green
+            QColor(200, 0, 200),    // Purple
+            QColor(255, 200, 0)     // Yellow
+        };
+        
+        for (size_t i = 0; i < tracks.size(); ++i) {
+            const auto& track = tracks[i];
+            
+            // Draw lane separator
+            painter.drawLine(0, yOffset + trackHeight + trackMargin/2, w, yOffset + trackHeight + trackMargin/2);
+            
+            // Pick a color for this track
+            QColor baseColor = trackColors[i % 5];
+            QColor fillColor = baseColor;
+            fillColor.setAlpha(100);
+            
+            // Draw all clips in this track
+            for (const auto& item : track.items) {
+                int startX = item.startTimeSecs * m_pixelsPerSecond;
+                int itemW = item.durationSecs * m_pixelsPerSecond;
+                
+                QRect clipRect(startX, yOffset + 10, itemW, trackHeight - 20);
+                
+                // Fill
+                painter.fillRect(clipRect, fillColor);
+                
+                // Border
+                painter.setPen(QPen(baseColor, 1));
+                painter.drawRect(clipRect);
+                
+                // Draw name or ID placeholder
+                painter.setPen(QPen(QColor("#ffffff"), 1));
+                painter.drawText(clipRect.adjusted(5, 5, -5, -5), Qt::AlignLeft | Qt::AlignTop, QString("Item %1").arg(item.id));
+                
+                // Reset pen for grid/separators
+                painter.setPen(QPen(QColor("#222225"), 1));
+            }
+            
+            yOffset += (trackHeight + trackMargin);
+        }
     }
-    
-    // Draw Placeholder Clips
-    // Just a couple colored blocks to represent waveforms
-    painter.fillRect(QRect(m_pixelsPerSecond * 2, 10, m_pixelsPerSecond * 5, 80), QColor(0, 150, 255, 100)); // Track 1
-    painter.setPen(QPen(QColor(0, 150, 255), 1));
-    painter.drawRect(QRect(m_pixelsPerSecond * 2, 10, m_pixelsPerSecond * 5, 80));
-    
-    painter.fillRect(QRect(m_pixelsPerSecond * 4, 110, m_pixelsPerSecond * 3, 80), QColor(255, 100, 0, 100)); // Track 2
-    painter.setPen(QPen(QColor(255, 100, 0), 1));
-    painter.drawRect(QRect(m_pixelsPerSecond * 4, 110, m_pixelsPerSecond * 3, 80));
     
     // Draw Playhead
     if (m_engine) {
@@ -185,12 +236,32 @@ TimelineContainer::TimelineContainer(dsp::AudioEngine* engine, QWidget* parent)
     
     // Sync the horizontal scrollbar with the Ruler widget so it renders the ticks correctly
     connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, &TimelineContainer::onHorizontalScroll);
+    
+    connect(m_lanes, &TimelineLanesWidget::requestScroll, this, &TimelineContainer::onScrollRequested);
 }
 
 void TimelineContainer::onHorizontalScroll(int value)
 {
     if (m_ruler) {
         m_ruler->setScrollOffset(value);
+    }
+}
+
+void TimelineContainer::onScrollRequested(int playheadX)
+{
+    QScrollBar* hBar = horizontalScrollBar();
+    if (!hBar) return;
+    
+    int viewWidth = viewport()->width();
+    int currentScroll = hBar->value();
+    
+    // Auto-scroll (page style) if playhead goes past the right edge
+    if (playheadX > currentScroll + viewWidth - 50) {
+        hBar->setValue(playheadX - 50);
+    }
+    // Auto-scroll if user scrolled past the playhead on the left
+    else if (playheadX < currentScroll) {
+        hBar->setValue(playheadX - 50);
     }
 }
 

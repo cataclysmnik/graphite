@@ -3,7 +3,9 @@
 #include <QMainWindow>
 #include <QSplitter>
 #include <QTabWidget>
+#include <memory>
 #include <vector>
+#include <QPushButton>
 #include <QButtonGroup>
 
 namespace dsp {
@@ -40,6 +42,7 @@ private slots:
     void selectTrack(int index);
     void openAudioSettings();
     void reorderTracks(int fromIndex, int toIndex);
+    void togglePlayback();
 
 private:
     void setupUi();
@@ -60,9 +63,13 @@ private:
     std::vector<class TrackCard*> m_trackCards;
     std::vector<class MixerStrip*> m_mixerStrips;
     class EffectsRack* m_effectsRack;
+    class TimelineContainer* m_timeline;
+    
     int m_selectedTrackIndex = 0;
     
     QButtonGroup* m_armModeGroup;
+    QPushButton* m_btnPlayPause;
+    
     ArmMode m_armMode = ArmMode::Standard;
 };
 

@@ -23,6 +23,9 @@
 #include <QDropEvent>
 #include <QMetaObject>
 #include <QButtonGroup>
+#include <QScrollBar>
+#include <QKeyEvent>
+#include <QShortcut>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -87,17 +90,7 @@ void MainWindow::setupUi()
     toolbarLayout->setContentsMargins(10, 4, 10, 4);
     toolbarLayout->setSpacing(8);
 
-    QPushButton* btnPlay = new QPushButton(QIcon(":/icons/play.svg"), "", toolbar);
-    QPushButton* btnPause = new QPushButton(QIcon(":/icons/pause.svg"), "", toolbar);
-    QPushButton* btnStop = new QPushButton(QIcon(":/icons/stop.svg"), "", toolbar);
-    QPushButton* btnRecord = new QPushButton(QIcon(":/icons/record.svg"), "", toolbar);
-    
-    // Style icons
-    for (auto btn : {btnPlay, btnPause, btnStop, btnRecord}) {
-        btn->setFixedSize(32, 32);
-        btn->setIconSize(QSize(16, 16));
-        toolbarLayout->addWidget(btn);
-    }
+    // Transport controls moved from here to above TCP
     
     toolbarLayout->addStretch();
     
@@ -121,11 +114,12 @@ void MainWindow::setupUi()
     tcpLayout->setContentsMargins(10, 4, 10, 4);
     tcpLayout->setSpacing(0);
     
-    // Arm Mode Toolbar
+    // Transport & Arm Mode Toolbar
     QHBoxLayout* armModeLayout = new QHBoxLayout();
     armModeLayout->setContentsMargins(0, 0, 0, 4);
     armModeLayout->setSpacing(6);
     
+    // Arm Mode Toolbar (Transport moved to timeline panel)
     m_armModeGroup = new QButtonGroup(this);
     m_armModeGroup->setExclusive(true);
     
@@ -133,16 +127,19 @@ void MainWindow::setupUi()
     btnStandard->setCheckable(true);
     btnStandard->setChecked(true);
     btnStandard->setFixedHeight(20);
+    btnStandard->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnStandard, (int)ArmMode::Standard);
     
     QPushButton* btnUnion = new QPushButton("UNION");
     btnUnion->setCheckable(true);
     btnUnion->setFixedHeight(20);
+    btnUnion->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnUnion, (int)ArmMode::Union);
     
     QPushButton* btnExclusive = new QPushButton("EXCLUSIVE");
     btnExclusive->setCheckable(true);
     btnExclusive->setFixedHeight(20);
+    btnExclusive->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnExclusive, (int)ArmMode::Exclusive);
     
     armModeLayout->addWidget(btnStandard);
@@ -193,11 +190,56 @@ void MainWindow::setupUi()
     }
 
     // Right Panel (Timeline)
-    TimelineContainer* timeline = new TimelineContainer(m_engine, m_topWorkspace);
-    timeline->setObjectName("TimelineContainer");
+    QWidget* timelinePanel = new QWidget();
+    timelinePanel->setObjectName("TimelinePanel");
+    QVBoxLayout* timelineLayout = new QVBoxLayout(timelinePanel);
+    timelineLayout->setContentsMargins(10, 4, 10, 4);
+    timelineLayout->setSpacing(0);
+    
+    // Transport Toolbar (above timeline)
+    QHBoxLayout* transportLayout = new QHBoxLayout();
+    transportLayout->setContentsMargins(0, 0, 0, 4);
+    transportLayout->setSpacing(6);
+    
+    m_btnPlayPause = new QPushButton(QIcon(":/icons/play.svg"), "");
+    m_btnPlayPause->setFixedSize(32, 24);
+    m_btnPlayPause->setIconSize(QSize(16, 16));
+    m_btnPlayPause->setFocusPolicy(Qt::NoFocus);
+    connect(m_btnPlayPause, &QPushButton::clicked, this, &MainWindow::togglePlayback);
+    
+    QPushButton* btnStop = new QPushButton(QIcon(":/icons/stop.svg"), "");
+    btnStop->setFixedSize(32, 24);
+    btnStop->setIconSize(QSize(16, 16));
+    btnStop->setFocusPolicy(Qt::NoFocus);
+    connect(btnStop, &QPushButton::clicked, [this]() {
+        if (m_engine) {
+            m_engine->setPlaying(false);
+            m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+        }
+    });
+    
+    transportLayout->addWidget(m_btnPlayPause);
+    transportLayout->addWidget(btnStop);
+    transportLayout->addStretch();
+    timelineLayout->addLayout(transportLayout);
+    
+    // Global spacebar shortcut for play/pause
+    QShortcut* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
+    spaceShortcut->setContext(Qt::ApplicationShortcut);
+    connect(spaceShortcut, &QShortcut::activated, this, &MainWindow::togglePlayback);
+    
+    m_timeline = new TimelineContainer(m_engine, timelinePanel);
+    m_timeline->setObjectName("TimelineContainer");
+    timelineLayout->addWidget(m_timeline);
+    
+    // Synchronize vertical scrolling between TCP and Timeline
+    connect(tcpList->verticalScrollBar(), &QScrollBar::valueChanged,
+            m_timeline->verticalScrollBar(), &QScrollBar::setValue);
+    connect(m_timeline->verticalScrollBar(), &QScrollBar::valueChanged,
+            tcpList->verticalScrollBar(), &QScrollBar::setValue);
 
     m_topWorkspace->addWidget(m_tcpPanel);
-    m_topWorkspace->addWidget(timeline);
+    m_topWorkspace->addWidget(timelinePanel);
     m_topWorkspace->setSizes({320, 680});
     m_mainSplitter->addWidget(m_topWorkspace);
 
@@ -289,13 +331,7 @@ void MainWindow::setupUi()
 
     mainLayout->addWidget(m_mainSplitter);
 
-    // Wire up actions
-    connect(btnPlay, &QPushButton::clicked, [this]() {
-        if (m_engine) m_engine->setPlaying(true);
-    });
-    connect(btnPause, &QPushButton::clicked, [this]() {
-        if (m_engine) m_engine->setPlaying(false);
-    });
+    // Action wiring now handled inline for transport
 }
 
 void MainWindow::setupMenus()
@@ -442,12 +478,25 @@ void MainWindow::reorderTracks(int fromIndex, int toIndex)
         m_trackCards[i]->setTrackIndex(i);
     }
     
+    if (m_timeline) {
+        m_timeline->update();
+    }
+    
     // Request MixerPanel to reorder
     if (m_bottomDock->count() > 1) {
         // MixerPanel is the second tab
         if (auto mixerPanel = qobject_cast<MixerPanel*>(m_bottomDock->widget(1))) {
             mixerPanel->reorderStrips(fromIndex, toIndex);
         }
+    }
+}
+
+void MainWindow::togglePlayback()
+{
+    if (m_engine) {
+        bool isPlaying = m_engine->isEnginePlaying();
+        m_engine->setPlaying(!isPlaying);
+        m_btnPlayPause->setIcon(QIcon(isPlaying ? ":/icons/play.svg" : ":/icons/pause.svg"));
     }
 }
 
