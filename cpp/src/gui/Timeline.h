@@ -21,7 +21,11 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
     
+private:
+    void setPlayheadFromMouse(QMouseEvent* event);
 private:
     dsp::AudioEngine* m_engine;
     int m_scrollOffset { 0 };
@@ -42,6 +46,11 @@ signals:
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+
+private:
+    void setPlayheadFromMouse(QMouseEvent* event);
 
 private slots:
     void onPlayheadTimerTick();
@@ -61,6 +70,10 @@ class TimelineContainer : public QScrollArea
     Q_OBJECT
 public:
     explicit TimelineContainer(dsp::AudioEngine* engine, QWidget* parent = nullptr);
+    void zoom(double factor, QPoint centerPos);
+
+protected:
+    void wheelEvent(QWheelEvent* event) override;
 
 private slots:
     void onHorizontalScroll(int value);

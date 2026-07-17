@@ -32,7 +32,10 @@ public:
     // GUI interactions (called from Qt Main Thread)
     void sendMessageFromUI(const EngineMessage& msg);
     void setPlaying(bool shouldPlay);
+    void setRecording(bool shouldRecord);
+    void setPlayheadPosition(double timeSecs);
     bool isEnginePlaying() const { return isPlaying.load(); }
+    bool isEngineRecording() const { return isRecording.load(); }
     double getPlayheadTime() const { return playheadTimeSeconds.load(); }
     
     // Track State Getters (thread safe-ish for UI)
@@ -41,6 +44,12 @@ public:
     float getTrackPeakR(int trackIndex) const;
     
     std::vector<Track> getTracksSnapshot() const;
+    
+    // Live Recording Getters
+    const juce::AudioBuffer<float>* getRecordBuffer(int trackId) const;
+    int getRecordSamplesWritten(int trackId) const;
+    double getRecordStartTime(int trackId) const;
+    double getCurrentSampleRate() const { return currentSampleRate.load(); }
     
     // Plugin Management getters for UI
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
@@ -68,9 +77,15 @@ private:
 
     // Engine State
     std::atomic<bool> isPlaying { false };
+    std::atomic<bool> isRecording { false };
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> playheadTimeSeconds { 0.0 };
     std::atomic<int> selectedTrackIndex { 0 };
+    
+    // Recording buffers
+    std::vector<std::unique_ptr<juce::AudioBuffer<float>>> m_recordBuffers;
+    std::vector<int> m_recordSamplesWritten;
+    std::vector<double> m_recordStartTimes;
     
     // Concurrency for plugins
     std::mutex m_pluginMutex;

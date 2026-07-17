@@ -2,6 +2,8 @@
 #include "../audio/AudioEngine.h"
 #include <QPainter>
 #include <QPaintEvent>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QVBoxLayout>
 #include <QScrollBar>
 
@@ -82,6 +84,31 @@ void TimeRulerWidget::paintEvent(QPaintEvent* event)
     }
 }
 
+void TimeRulerWidget::setPlayheadFromMouse(QMouseEvent* event)
+{
+    if (!m_engine) return;
+    
+    // Calculate time from x position taking scroll into account
+    int absoluteX = event->x() + m_scrollOffset;
+    double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
+    
+    m_engine->setPlayheadPosition(timeSecs);
+}
+
+void TimeRulerWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        setPlayheadFromMouse(event);
+    }
+}
+
+void TimeRulerWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (event->buttons() & Qt::LeftButton) {
+        setPlayheadFromMouse(event);
+    }
+}
+
 
 // ============================================================================
 // TimelineLanesWidget
@@ -105,14 +132,17 @@ void TimelineLanesWidget::setZoom(double pixelsPerSecond)
 
 void TimelineLanesWidget::onPlayheadTimerTick()
 {
-    if (m_engine && m_engine->isEnginePlaying()) {
+    if (m_engine) {
+        // Even if not playing, we want to update if it moved (e.g. from scrubbing)
         double currentPlayhead = m_engine->getPlayheadTime();
         if (currentPlayhead != m_lastPlayheadTime) {
             m_lastPlayheadTime = currentPlayhead;
             
-            // Emit scroll request so container can follow
-            int playheadX = currentPlayhead * m_pixelsPerSecond;
-            emit requestScroll(playheadX);
+            // Emit scroll request so container can follow if playing
+            if (m_engine->isEnginePlaying()) {
+                int playheadX = currentPlayhead * m_pixelsPerSecond;
+                emit requestScroll(playheadX);
+            }
             
             update(); // Repaint the playhead
         }
@@ -127,11 +157,12 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
     int w = width();
     int h = height();
     
-    // Background
-    painter.fillRect(event->rect(), QColor("#111111"));
+    // Background (Stark Black)
+    painter.fillRect(event->rect(), QColor("#050505"));
     
-    // Draw Grid Lines (simplified)
-    painter.setPen(QPen(QColor("#222225"), 1));
+    // Draw Grid Lines (Dotted)
+    QPen gridPen(QColor("#222222"), 1, Qt::DotLine);
+    painter.setPen(gridPen);
     int maxSeconds = w / m_pixelsPerSecond;
     for (int s = 0; s <= maxSeconds; s++) {
         int x = s * m_pixelsPerSecond;
@@ -154,25 +185,11 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
         int trackHeight = 100;
         int trackMargin = 4;
         
-        // Base colors for tracks to make them distinct
-        QColor trackColors[] = {
-            QColor(0, 150, 255),    // Blue
-            QColor(255, 100, 0),    // Orange
-            QColor(0, 200, 100),    // Green
-            QColor(200, 0, 200),    // Purple
-            QColor(255, 200, 0)     // Yellow
-        };
-        
         for (size_t i = 0; i < tracks.size(); ++i) {
             const auto& track = tracks[i];
             
-            // Draw lane separator
+            // Draw lane separator (solid)
             painter.drawLine(0, yOffset + trackHeight + trackMargin/2, w, yOffset + trackHeight + trackMargin/2);
-            
-            // Pick a color for this track
-            QColor baseColor = trackColors[i % 5];
-            QColor fillColor = baseColor;
-            fillColor.setAlpha(100);
             
             // Draw all clips in this track
             for (const auto& item : track.items) {
@@ -181,32 +198,188 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
                 
                 QRect clipRect(startX, yOffset + 10, itemW, trackHeight - 20);
                 
-                // Fill
-                painter.fillRect(clipRect, fillColor);
+                // Nothing Aesthetic: Transparent background, white dotted/solid border
+                painter.fillRect(clipRect, QColor("#111111"));
                 
                 // Border
-                painter.setPen(QPen(baseColor, 1));
+                painter.setPen(QPen(QColor("#ffffff"), 1));
                 painter.drawRect(clipRect);
                 
-                // Draw name or ID placeholder
-                painter.setPen(QPen(QColor("#ffffff"), 1));
-                painter.drawText(clipRect.adjusted(5, 5, -5, -5), Qt::AlignLeft | Qt::AlignTop, QString("Item %1").arg(item.id));
+                // Draw name or ID placeholder (Monospaced look if possible)
+                painter.setPen(QPen(QColor("#aaaaaa"), 1));
+                QFont f = painter.font();
+                f.setFamily("Courier"); // Or whatever monospace is available
+                f.setPixelSize(11);
+                painter.setFont(f);
+                painter.drawText(clipRect.adjusted(5, 5, -5, -5), Qt::AlignLeft | Qt::AlignTop, QString("CLIP %1").arg(item.id));
                 
-                // Reset pen for grid/separators
+                // Draw Waveform if buffer exists
+                if (item.buffer != nullptr && item.buffer->getNumSamples() > 0) {
+                    painter.setPen(QPen(QColor("#ffffff"), 1)); // White waveform
+                    int numSamples = item.buffer->getNumSamples();
+                    const float* channelData = item.buffer->getReadPointer(0); // Draw left channel
+                    
+                    int midY = clipRect.y() + clipRect.height() / 2;
+                    float halfHeight = clipRect.height() / 2.0f;
+                    
+                    int prevX = -1;
+                    float maxAmplitudeInPixel = 0.0f;
+                    float minAmplitudeInPixel = 0.0f;
+                    
+                    for (int s = 0; s < numSamples; ++s) {
+                        float sample = channelData[s];
+                        int currentX = clipRect.x() + (int)((float)s / numSamples * itemW);
+                        
+                        if (currentX > clipRect.right()) break;
+                        
+                        if (currentX != prevX) {
+                            if (prevX != -1) {
+                                int yTop = midY - (int)(maxAmplitudeInPixel * halfHeight);
+                                int yBottom = midY - (int)(minAmplitudeInPixel * halfHeight);
+                                if (yTop == yBottom) {
+                                    painter.drawPoint(prevX, yTop);
+                                } else {
+                                    painter.drawLine(prevX, yTop, prevX, yBottom);
+                                }
+                            }
+                            prevX = currentX;
+                            maxAmplitudeInPixel = sample;
+                            minAmplitudeInPixel = sample;
+                        } else {
+                            if (sample > maxAmplitudeInPixel) maxAmplitudeInPixel = sample;
+                            if (sample < minAmplitudeInPixel) minAmplitudeInPixel = sample;
+                        }
+                    }
+                    if (prevX != -1 && prevX <= clipRect.right()) {
+                        int yTop = midY - (int)(maxAmplitudeInPixel * halfHeight);
+                        int yBottom = midY - (int)(minAmplitudeInPixel * halfHeight);
+                        painter.drawLine(prevX, yTop, prevX, yBottom);
+                    }
+                }
+                
                 painter.setPen(QPen(QColor("#222225"), 1));
+            }
+            
+            // Draw Live Recording Waveform
+            if (m_engine->isEngineRecording() && track.isArmed) {
+                auto* recBuffer = m_engine->getRecordBuffer(track.id);
+                int samplesWritten = m_engine->getRecordSamplesWritten(track.id);
+                double startTime = m_engine->getRecordStartTime(track.id);
+                double currentSr = m_engine->getCurrentSampleRate();
+                
+                if (recBuffer && samplesWritten > 0 && currentSr > 0) {
+                    double durationSecs = (double)samplesWritten / currentSr;
+                    int startX = startTime * m_pixelsPerSecond;
+                    int itemW = durationSecs * m_pixelsPerSecond;
+                    itemW = std::max(1, itemW);
+                    
+                    QRect clipRect(startX, yOffset + 10, itemW, trackHeight - 20);
+                    
+                    // Draw recording background (darker red)
+                    painter.fillRect(clipRect, QColor("#1a0505"));
+                    
+                    // Draw waveform
+                    painter.setPen(QPen(QColor("#ff3333"), 1));
+                    const float* channelData = recBuffer->getReadPointer(0);
+                    
+                    int midY = clipRect.y() + clipRect.height() / 2;
+                    float halfHeight = clipRect.height() / 2.0f;
+                    int prevX = -1;
+                    float maxAmp = 0.0f;
+                    float minAmp = 0.0f;
+                    
+                    // Start from the most recent samples that fit on screen to optimize
+                    int startSample = std::max(0, samplesWritten - (int)((w / m_pixelsPerSecond) * currentSr));
+                    
+                    for (int s = startSample; s < samplesWritten; ++s) {
+                        float sample = channelData[s];
+                        int currentX = clipRect.x() + (int)((float)s / samplesWritten * itemW);
+                        
+                        if (currentX > clipRect.right()) break;
+                        
+                        if (currentX != prevX) {
+                            if (prevX != -1) {
+                                int yTop = midY - (int)(maxAmp * halfHeight);
+                                int yBottom = midY - (int)(minAmp * halfHeight);
+                                if (yTop == yBottom) {
+                                    painter.drawPoint(prevX, yTop);
+                                } else {
+                                    painter.drawLine(prevX, yTop, prevX, yBottom);
+                                }
+                            }
+                            prevX = currentX;
+                            maxAmp = sample;
+                            minAmp = sample;
+                        } else {
+                            if (sample > maxAmp) maxAmp = sample;
+                            if (sample < minAmp) minAmp = sample;
+                        }
+                    }
+                    if (prevX != -1 && prevX <= clipRect.right()) {
+                        int yTop = midY - (int)(maxAmp * halfHeight);
+                        int yBottom = midY - (int)(minAmp * halfHeight);
+                        painter.drawLine(prevX, yTop, prevX, yBottom);
+                    }
+                    
+                    // Draw dotted red border for live recording
+                    painter.setPen(QPen(QColor("#ff3333"), 1, Qt::DotLine));
+                    painter.drawRect(clipRect);
+                    
+                    // Recording text
+                    painter.setPen(QPen(QColor("#ff3333"), 1));
+                    QFont f = painter.font();
+                    f.setFamily("Courier");
+                    f.setPixelSize(11);
+                    painter.setFont(f);
+                    painter.drawText(clipRect.adjusted(5, 5, -5, -5), Qt::AlignLeft | Qt::AlignTop, "REC");
+                    
+                    // Reset brush/pen
+                    painter.setPen(QPen(QColor("#222222"), 1, Qt::SolidLine));
+                    painter.setBrush(Qt::NoBrush);
+                }
             }
             
             yOffset += (trackHeight + trackMargin);
         }
     }
     
-    // Draw Playhead
+    // Draw Playhead (Nothing Red)
     if (m_engine) {
         double playheadTime = m_engine->getPlayheadTime();
         int playheadX = playheadTime * m_pixelsPerSecond;
         
-        painter.setPen(QPen(QColor("#ff0033"), 2));
+        painter.setPen(QPen(QColor("#ff3333"), 2));
         painter.drawLine(playheadX, 0, playheadX, h);
+        
+        // Draw playhead triangle/dot at top
+        painter.setBrush(QColor("#ff3333"));
+        painter.setPen(Qt::NoPen);
+        QPolygon polygon;
+        polygon << QPoint(playheadX - 5, 0) << QPoint(playheadX + 5, 0) << QPoint(playheadX, 8);
+        painter.drawPolygon(polygon);
+    }
+}
+
+void TimelineLanesWidget::setPlayheadFromMouse(QMouseEvent* event)
+{
+    if (!m_engine) return;
+    
+    // Lanes are already inside a scroll area, so event->x() is the absolute width
+    double timeSecs = std::max(0.0, (double)event->x() / m_pixelsPerSecond);
+    m_engine->setPlayheadPosition(timeSecs);
+}
+
+void TimelineLanesWidget::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        setPlayheadFromMouse(event);
+    }
+}
+
+void TimelineLanesWidget::mouseMoveEvent(QMouseEvent* event)
+{
+    if (event->buttons() & Qt::LeftButton) {
+        setPlayheadFromMouse(event);
     }
 }
 
@@ -249,19 +422,58 @@ void TimelineContainer::onHorizontalScroll(int value)
 
 void TimelineContainer::onScrollRequested(int playheadX)
 {
+    // Autoscroll logic
     QScrollBar* hBar = horizontalScrollBar();
-    if (!hBar) return;
+    int viewportWidth = viewport()->width();
     
-    int viewWidth = viewport()->width();
-    int currentScroll = hBar->value();
-    
-    // Auto-scroll (page style) if playhead goes past the right edge
-    if (playheadX > currentScroll + viewWidth - 50) {
-        hBar->setValue(playheadX - 50);
+    // If playhead approaches the right edge (within 100px), scroll page
+    if (playheadX > hBar->value() + viewportWidth - 100) {
+        hBar->setValue(playheadX - 100);
     }
-    // Auto-scroll if user scrolled past the playhead on the left
-    else if (playheadX < currentScroll) {
-        hBar->setValue(playheadX - 50);
+}
+
+void TimelineContainer::zoom(double factor, QPoint centerPos)
+{
+    // Get current zoom
+    double currentZoom = m_lanes->property("pixelsPerSecond").toDouble();
+    if (currentZoom == 0.0) currentZoom = 50.0;
+    
+    // Calculate new zoom (clamp between 5px/s and 1000px/s)
+    double newZoom = std::clamp(currentZoom * factor, 5.0, 1000.0);
+    
+    if (newZoom != currentZoom) {
+        // Calculate the time at the center position
+        int absoluteX = horizontalScrollBar()->value() + centerPos.x();
+        double timeAtCenter = absoluteX / currentZoom;
+        
+        // Update zoom on widgets
+        m_ruler->setZoom(newZoom);
+        m_lanes->setZoom(newZoom);
+        
+        // Store property to retrieve later
+        m_lanes->setProperty("pixelsPerSecond", newZoom);
+        
+        // Adjust widths
+        int newWidth = 3600 * newZoom; // 1 hour max for now
+        m_ruler->setMinimumWidth(newWidth);
+        m_lanes->setMinimumWidth(newWidth);
+        
+        // Restore center position
+        int newAbsoluteX = timeAtCenter * newZoom;
+        horizontalScrollBar()->setValue(newAbsoluteX - centerPos.x());
+    }
+}
+
+void TimelineContainer::wheelEvent(QWheelEvent* event)
+{
+    if (event->modifiers() & Qt::ControlModifier) {
+        // Zoom
+        double factor = (event->angleDelta().y() > 0) ? 1.2 : 1.0 / 1.2;
+        zoom(factor, event->position().toPoint());
+        event->accept();
+    } else {
+        // Normal scrolling
+        QScrollArea::wheelEvent(event);
     }
 }
 

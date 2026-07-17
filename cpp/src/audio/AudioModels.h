@@ -16,7 +16,7 @@ struct AudioItem {
     double durationSecs;
     
     // In a real application, we'd store a lock-free reference to an audio buffer pool
-    // juce::AudioBuffer<float>* buffer;
+    std::shared_ptr<juce::AudioBuffer<float>> buffer;
 };
 
 struct Track {
@@ -55,7 +55,9 @@ enum class EngineCommandType {
     SetTrackSelect,
     MovePlugin,
     DeletePlugin,
-    MoveTrack
+    MoveTrack,
+    SetRecording,
+    SetPlayheadPosition
 };
 
 struct EngineMessage {

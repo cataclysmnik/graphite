@@ -43,6 +43,9 @@ private slots:
     void openAudioSettings();
     void reorderTracks(int fromIndex, int toIndex);
     void togglePlayback();
+    void toggleRecording();
+    void zoomIn();
+    void zoomOut();
 
 private:
     void setupUi();
@@ -69,6 +72,10 @@ private:
     
     QButtonGroup* m_armModeGroup;
     QPushButton* m_btnPlayPause;
+    QPushButton* m_btnRecord;
+    
+    bool m_isRecording = false;
+    bool m_isPlaying = false;
     
     ArmMode m_armMode = ArmMode::Standard;
 };

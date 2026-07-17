@@ -218,6 +218,13 @@ void MainWindow::setupUi()
         }
     });
     
+    m_btnRecord = new QPushButton(QChar(0x25CF), this); // Record circle
+    m_btnRecord->setFixedSize(32, 24);
+    m_btnRecord->setStyleSheet("color: #ff3333; font-size: 14px;");
+    m_btnRecord->setFocusPolicy(Qt::NoFocus);
+    connect(m_btnRecord, &QPushButton::clicked, this, &MainWindow::toggleRecording);
+
+    transportLayout->addWidget(m_btnRecord);
     transportLayout->addWidget(m_btnPlayPause);
     transportLayout->addWidget(btnStop);
     transportLayout->addStretch();
@@ -226,7 +233,27 @@ void MainWindow::setupUi()
     // Global spacebar shortcut for play/pause
     QShortcut* spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
     spaceShortcut->setContext(Qt::ApplicationShortcut);
+    spaceShortcut->setAutoRepeat(false);
     connect(spaceShortcut, &QShortcut::activated, this, &MainWindow::togglePlayback);
+    
+    // Zoom shortcuts
+    QShortcut* zoomInShortcut1 = new QShortcut(QKeySequence("Ctrl+="), this);
+    zoomInShortcut1->setContext(Qt::ApplicationShortcut);
+    connect(zoomInShortcut1, &QShortcut::activated, this, &MainWindow::zoomIn);
+    
+    QShortcut* zoomInShortcut2 = new QShortcut(QKeySequence("Ctrl++"), this);
+    zoomInShortcut2->setContext(Qt::ApplicationShortcut);
+    connect(zoomInShortcut2, &QShortcut::activated, this, &MainWindow::zoomIn);
+    
+    QShortcut* zoomOutShortcut = new QShortcut(QKeySequence("Ctrl+-"), this);
+    zoomOutShortcut->setContext(Qt::ApplicationShortcut);
+    connect(zoomOutShortcut, &QShortcut::activated, this, &MainWindow::zoomOut);
+    
+    // Record shortcut
+    QShortcut* recordShortcut = new QShortcut(QKeySequence("R"), this);
+    recordShortcut->setContext(Qt::ApplicationShortcut);
+    recordShortcut->setAutoRepeat(false);
+    connect(recordShortcut, &QShortcut::activated, this, &MainWindow::toggleRecording);
     
     m_timeline = new TimelineContainer(m_engine, timelinePanel);
     m_timeline->setObjectName("TimelineContainer");
@@ -494,9 +521,63 @@ void MainWindow::reorderTracks(int fromIndex, int toIndex)
 void MainWindow::togglePlayback()
 {
     if (m_engine) {
-        bool isPlaying = m_engine->isEnginePlaying();
-        m_engine->setPlaying(!isPlaying);
-        m_btnPlayPause->setIcon(QIcon(isPlaying ? ":/icons/play.svg" : ":/icons/pause.svg"));
+        m_isPlaying = !m_isPlaying;
+        m_engine->setPlaying(m_isPlaying);
+        
+        if (!m_isPlaying) {
+            m_btnPlayPause->setIcon(QIcon(":/icons/pause.svg"));
+            // Also stop recording if we stop playback
+            if (m_isRecording) {
+                m_isRecording = false;
+                m_engine->setRecording(false);
+                m_btnRecord->setStyleSheet("color: #ff3333; background-color: transparent; font-size: 14px;");
+            }
+        } else {
+            m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+        }
+    }
+}
+
+void MainWindow::toggleRecording()
+{
+    if (m_engine) {
+        m_isRecording = !m_isRecording;
+        m_engine->setRecording(m_isRecording);
+        
+        if (!m_isRecording) {
+            // Stopped recording. Engine continues playing.
+            m_btnRecord->setStyleSheet("color: #ff3333; background-color: transparent; font-size: 14px;");
+            // Keep playing state as is, but ensure UI reflects it
+            m_isPlaying = m_engine->isEnginePlaying();
+            if (m_isPlaying) {
+                m_btnPlayPause->setIcon(QIcon(":/icons/pause.svg"));
+            } else {
+                m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+            }
+        } else {
+            // Started recording. Engine automatically plays.
+            m_btnRecord->setStyleSheet("color: #ffffff; background-color: #ff0000; border-radius: 4px; font-size: 14px;");
+            m_isPlaying = true;
+            m_btnPlayPause->setIcon(QIcon(":/icons/pause.svg"));
+        }
+    }
+}
+
+void MainWindow::zoomIn()
+{
+    if (m_timeline) {
+        // Zoom centering on the middle of the viewport
+        QPoint center(m_timeline->viewport()->width() / 2, 0);
+        m_timeline->zoom(1.2, center);
+    }
+}
+
+void MainWindow::zoomOut()
+{
+    if (m_timeline) {
+        // Zoom centering on the middle of the viewport
+        QPoint center(m_timeline->viewport()->width() / 2, 0);
+        m_timeline->zoom(1.0 / 1.2, center);
     }
 }
 

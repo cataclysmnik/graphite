@@ -69,8 +69,11 @@ void AudioEngine::timerCallback()
 
 AudioEngine::AudioEngine()
 {
-    // Setup VST3 format
     pluginFormatManager.addDefaultFormats();
+
+    m_recordBuffers.resize(32);
+    m_recordSamplesWritten.resize(32, 0);
+    m_recordStartTimes.resize(32, 0.0);
 
     // Load previously scanned plugins from XML
     loadKnownPlugins();
@@ -80,7 +83,7 @@ AudioEngine::AudioEngine()
         scanForPlugins();
     }
 
-    // Create default tracks with some dummy audio items for timeline testing
+    // Create default tracks
     for (int i = 0; i < 4; ++i) {
         Track t;
         t.id = i;
@@ -88,21 +91,6 @@ AudioEngine::AudioEngine()
         else if (i == 1) t.name = "Rhythm Guitar";
         else if (i == 2) t.name = "Bass";
         else if (i == 3) t.name = "Drums";
-        
-        // Add a few dummy clips
-        AudioItem item1;
-        item1.id = i * 10 + 1;
-        item1.startTimeSecs = i * 2.0; // Staggered start times
-        item1.durationSecs = 5.0 + i;
-        item1.offsetSecs = 0.0;
-        t.items.push_back(item1);
-        
-        AudioItem item2;
-        item2.id = i * 10 + 2;
-        item2.startTimeSecs = i * 2.0 + 8.0;
-        item2.durationSecs = 3.0;
-        item2.offsetSecs = 0.0;
-        t.items.push_back(item2);
         
         tracks.push_back(std::move(t));
     }
@@ -116,6 +104,12 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
     if (device != nullptr) {
         currentSampleRate.store(device->getCurrentSampleRate());
+        
+        // Preallocate record buffers (10 minutes stereo at sample rate)
+        for (int i = 0; i < 32; ++i) {
+            m_recordBuffers[i] = std::make_unique<juce::AudioBuffer<float>>(2, (int)(currentSampleRate.load() * 60.0 * 10.0));
+            m_recordBuffers[i]->clear();
+        }
         
         // Prepare all loaded plugins
         for (auto& track : tracks) {
@@ -167,6 +161,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
     float monoInput[MAX_BUFFER] = {0.0f};
     
     int samplesToProcess = juce::jmin(numSamples, MAX_BUFFER);
+    
+    double currentPlayhead = playheadTimeSeconds.load();
+    double currentSr = currentSampleRate.load();
+    bool engineIsPlaying = isPlaying.load();
 
     // Capture mono hardware input (e.g. guitar)
     if (numInputChannels > 0 && samplesToProcess > 0) {
@@ -206,6 +204,63 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         if (track.isArmed && samplesToProcess > 0) {
             juce::FloatVectorOperations::copy(trackLeft, monoInput, samplesToProcess);
             juce::FloatVectorOperations::copy(trackRight, monoInput, samplesToProcess);
+            
+            // If recording, write to the track's record buffer
+            if (isRecording.load()) {
+                if (track.id >= 0 && track.id < m_recordBuffers.size() && m_recordBuffers[track.id] != nullptr) {
+                    int writePos = m_recordSamplesWritten[track.id];
+                    int available = m_recordBuffers[track.id]->getNumSamples() - writePos;
+                    int toWrite = std::min(samplesToProcess, available);
+                    
+                    if (toWrite > 0) {
+                        m_recordBuffers[track.id]->copyFrom(0, writePos, monoInput, toWrite);
+                        m_recordBuffers[track.id]->copyFrom(1, writePos, monoInput, toWrite);
+                        m_recordSamplesWritten[track.id] += toWrite;
+                    }
+                }
+            }
+        }
+        
+        // --- Playback Audio Items ---
+        if (engineIsPlaying && currentSr > 0.0) {
+            double endPlayhead = currentPlayhead + (double)samplesToProcess / currentSr;
+            
+            for (const auto& item : track.items) {
+                double itemEnd = item.startTimeSecs + item.durationSecs;
+                
+                // Check if clip overlaps this block
+                if (item.startTimeSecs < endPlayhead && itemEnd > currentPlayhead) {
+                    if (item.buffer != nullptr && item.buffer->getNumSamples() > 0) {
+                        int startSampleInBlock = 0;
+                        int startSampleInClip = 0;
+                        int samplesToCopy = samplesToProcess;
+                        
+                        if (currentPlayhead < item.startTimeSecs) {
+                            startSampleInBlock = (item.startTimeSecs - currentPlayhead) * currentSr;
+                            samplesToCopy -= startSampleInBlock;
+                        } else {
+                            startSampleInClip = (currentPlayhead - item.startTimeSecs) * currentSr;
+                        }
+                        
+                        if (endPlayhead > itemEnd) {
+                            int over = (endPlayhead - itemEnd) * currentSr;
+                            samplesToCopy -= over;
+                        }
+                        
+                        int availableInClip = item.buffer->getNumSamples() - startSampleInClip;
+                        samplesToCopy = std::min(samplesToCopy, availableInClip);
+                        
+                        if (samplesToCopy > 0 && startSampleInBlock >= 0 && startSampleInClip >= 0 && startSampleInBlock + samplesToCopy <= samplesToProcess) {
+                            juce::FloatVectorOperations::add(trackLeft + startSampleInBlock, item.buffer->getReadPointer(0, startSampleInClip), samplesToCopy);
+                            if (item.buffer->getNumChannels() > 1) {
+                                juce::FloatVectorOperations::add(trackRight + startSampleInBlock, item.buffer->getReadPointer(1, startSampleInClip), samplesToCopy);
+                            } else {
+                                juce::FloatVectorOperations::add(trackRight + startSampleInBlock, item.buffer->getReadPointer(0, startSampleInClip), samplesToCopy);
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         // --- VST3 Plugin Processing ---
@@ -284,6 +339,21 @@ void AudioEngine::setPlaying(bool shouldPlay)
     sendMessageFromUI(msg);
 }
 
+void AudioEngine::setRecording(bool shouldRecord)
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::SetRecording;
+    msg.boolValue = shouldRecord;
+    sendMessageFromUI(msg);
+}
+
+void AudioEngine::setPlayheadPosition(double timeSecs)
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::SetPlayheadPosition;
+    msg.floatValue = (float)timeSecs;
+    sendMessageFromUI(msg);
+}
 
 void AudioEngine::processMessages()
 {
@@ -299,10 +369,55 @@ void AudioEngine::processMessages()
                 case EngineCommandType::Play:
                     isPlaying.store(true, std::memory_order_relaxed);
                     break;
+                case EngineCommandType::SetPlayheadPosition:
+                    playheadTimeSeconds.store(std::max(0.0f, msg.floatValue), std::memory_order_relaxed);
+                    break;
                 case EngineCommandType::Pause:
                 case EngineCommandType::Stop:
                     isPlaying.store(false, std::memory_order_relaxed);
                     break;
+                case EngineCommandType::SetRecording: {
+                    bool wasRecording = isRecording.load(std::memory_order_relaxed);
+                    bool shouldRecord = msg.boolValue;
+                    
+                    if (shouldRecord && !wasRecording) {
+                        // Start recording
+                        isRecording.store(true, std::memory_order_relaxed);
+                        isPlaying.store(true, std::memory_order_relaxed); // Automatically play
+                        for (auto& track : tracks) {
+                            if (track.id >= 0 && track.id < m_recordBuffers.size()) {
+                                m_recordSamplesWritten[track.id] = 0;
+                                m_recordStartTimes[track.id] = playheadTimeSeconds.load();
+                            }
+                        }
+                    } else if (!shouldRecord && wasRecording) {
+                        // Stop recording
+                        isRecording.store(false, std::memory_order_relaxed);
+                        std::lock_guard<std::mutex> lock(m_trackMutex);
+                        
+                        for (auto& track : tracks) {
+                            if (track.isArmed && track.id >= 0 && track.id < m_recordBuffers.size()) {
+                                int written = m_recordSamplesWritten[track.id];
+                                if (written > 0) {
+                                    auto newBuf = std::make_shared<juce::AudioBuffer<float>>(2, written);
+                                    newBuf->copyFrom(0, 0, *m_recordBuffers[track.id], 0, 0, written);
+                                    newBuf->copyFrom(1, 0, *m_recordBuffers[track.id], 1, 0, written);
+                                    
+                                    AudioItem item;
+                                    item.id = track.items.size() + 1000; // Unique ID
+                                    item.startTimeSecs = m_recordStartTimes[track.id];
+                                    item.offsetSecs = 0.0;
+                                    item.durationSecs = (double)written / currentSampleRate.load();
+                                    item.buffer = newBuf;
+                                    
+                                    track.items.push_back(item);
+                                }
+                                m_recordSamplesWritten[track.id] = 0; // Reset
+                            }
+                        }
+                    }
+                    break;
+                }
                 case EngineCommandType::SetTrackVolume:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].volume = msg.floatValue;
@@ -552,6 +667,30 @@ std::vector<Track> AudioEngine::getTracksSnapshot() const
         snapshot.push_back(std::move(copy));
     }
     return snapshot;
+}
+
+const juce::AudioBuffer<float>* AudioEngine::getRecordBuffer(int trackId) const
+{
+    if (trackId >= 0 && trackId < m_recordBuffers.size()) {
+        return m_recordBuffers[trackId].get();
+    }
+    return nullptr;
+}
+
+int AudioEngine::getRecordSamplesWritten(int trackId) const
+{
+    if (trackId >= 0 && trackId < m_recordSamplesWritten.size()) {
+        return m_recordSamplesWritten[trackId];
+    }
+    return 0;
+}
+
+double AudioEngine::getRecordStartTime(int trackId) const
+{
+    if (trackId >= 0 && trackId < m_recordStartTimes.size()) {
+        return m_recordStartTimes[trackId];
+    }
+    return 0.0;
 }
 
 } // namespace dsp
