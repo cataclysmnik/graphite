@@ -2,6 +2,7 @@
 #include "../audio/AudioEngine.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QMouseEvent>
 
 namespace gui {
 
@@ -42,6 +43,15 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
         QSlider::handle:horizontal:hover {
             background: #ffffff;
         }
+        QProgressBar {
+            background-color: #1a1a1c;
+            border: 1px solid #222225;
+            border-radius: 2px;
+            text-align: center;
+        }
+        QProgressBar::chunk {
+            background-color: #00ff00;
+        }
     )");
 
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
@@ -69,31 +79,52 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
     
     mainLayout->addLayout(headerLayout);
 
-    // Volume Slider
-    QHBoxLayout* volLayout = new QHBoxLayout();
-    QLabel* volLabel = new QLabel("VOL", this);
-    volLabel->setStyleSheet("color: #88888c; font-size: 9px;");
+    // No volume slider here anymore
     
-    m_volSlider = new QSlider(Qt::Horizontal, this);
-    m_volSlider->setRange(0, 100);
-    m_volSlider->setValue(80); // Default 80% volume
+    // Meters
+    QHBoxLayout* meterLayout = new QHBoxLayout();
+    m_meterL = new QProgressBar(this);
+    m_meterL->setRange(0, 100);
+    m_meterL->setFixedHeight(4);
+    m_meterL->setTextVisible(false);
     
-    volLayout->addWidget(volLabel);
-    volLayout->addWidget(m_volSlider);
+    m_meterR = new QProgressBar(this);
+    m_meterR->setRange(0, 100);
+    m_meterR->setFixedHeight(4);
+    m_meterR->setTextVisible(false);
     
-    mainLayout->addLayout(volLayout);
+    meterLayout->addWidget(m_meterL);
+    meterLayout->addWidget(m_meterR);
+    mainLayout->addLayout(meterLayout);
     
     // Connect signals
     connect(m_btnMute, &QPushButton::toggled, this, &TrackCard::onMuteToggled);
     connect(m_btnSolo, &QPushButton::toggled, this, &TrackCard::onSoloToggled);
     connect(m_btnArm, &QPushButton::toggled, this, &TrackCard::onArmToggled);
-    connect(m_volSlider, &QSlider::valueChanged, this, &TrackCard::onVolumeChanged);
+    
+    m_meterTimer = new QTimer(this);
+    connect(m_meterTimer, &QTimer::timeout, this, &TrackCard::updateMeters);
+    m_meterTimer->start(50);
+}
+
+void TrackCard::updateMeters()
+{
+    if (m_engine && m_engine->isEnginePlaying()) {
+        float pL = m_engine->getTrackPeakL(m_trackIndex);
+        float pR = m_engine->getTrackPeakR(m_trackIndex);
+        
+        m_meterL->setValue(static_cast<int>(pL * 100.0f));
+        m_meterR->setValue(static_cast<int>(pR * 100.0f));
+    } else {
+        m_meterL->setValue(0);
+        m_meterR->setValue(0);
+    }
 }
 
 void TrackCard::mousePressEvent(QMouseEvent* event)
 {
     emit clicked(m_trackIndex);
-    QWidget::mousePressEvent(event);
+    event->ignore(); // allow QListWidget to process drag
 }
 
 void TrackCard::setSelected(bool selected)
@@ -134,17 +165,6 @@ void TrackCard::onArmToggled(bool checked)
         msg.type = dsp::EngineCommandType::SetTrackArm;
         msg.trackIndex = m_trackIndex;
         msg.boolValue = checked;
-        m_engine->sendMessageFromUI(msg);
-    }
-}
-
-void TrackCard::onVolumeChanged(int value)
-{
-    if (m_engine) {
-        dsp::EngineMessage msg;
-        msg.type = dsp::EngineCommandType::SetTrackVolume;
-        msg.trackIndex = m_trackIndex;
-        msg.floatValue = value / 100.0f; // Assuming 0-100 range
         m_engine->sendMessageFromUI(msg);
     }
 }

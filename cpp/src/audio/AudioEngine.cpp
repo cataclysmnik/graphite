@@ -161,9 +161,11 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         }
         juce::FloatVectorOperations::multiply(monoInput, 1.0f / (float)numInputChannels, samplesToProcess);
     }
-
     // Check for any soloed tracks
     bool anySolo = false;
+    
+    std::lock_guard<std::mutex> trackLock(m_trackMutex);
+    
     for (const auto& track : tracks) {
         if (track.isSolo) {
             anySolo = true;
@@ -212,6 +214,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         
         juce::FloatVectorOperations::multiply(trackLeft, gainL, samplesToProcess);
         juce::FloatVectorOperations::multiply(trackRight, gainR, samplesToProcess);
+        
+        // Metering: compute peak levels
+        auto absMaxL = juce::FloatVectorOperations::findMaximum(trackLeft, samplesToProcess);
+        auto absMaxR = juce::FloatVectorOperations::findMaximum(trackRight, samplesToProcess);
+        auto absMinL = juce::FloatVectorOperations::findMinimum(trackLeft, samplesToProcess);
+        auto absMinR = juce::FloatVectorOperations::findMinimum(trackRight, samplesToProcess);
+        
+        track.peakL = std::max(std::abs(absMaxL), std::abs(absMinL));
+        track.peakR = std::max(std::abs(absMaxR), std::abs(absMinR));
         
         // Sum into master output
         if (numOutputChannels >= 2) {
@@ -453,6 +464,50 @@ void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
     if (pluginIndex >= 0 && pluginIndex < plugins.size()) {
         plugins.erase(plugins.begin() + pluginIndex);
     }
+}
+
+void AudioEngine::moveTrackSynchronous(int fromIndex, int toIndex)
+{
+    std::lock_guard<std::mutex> lock(m_trackMutex);
+    if (fromIndex >= 0 && fromIndex < tracks.size() && 
+        toIndex >= 0 && toIndex < tracks.size() && 
+        fromIndex != toIndex) 
+    {
+        auto item = std::move(tracks[fromIndex]);
+        tracks.erase(tracks.begin() + fromIndex);
+        tracks.insert(tracks.begin() + toIndex, std::move(item));
+        
+        // Update IDs
+        for (int i = 0; i < tracks.size(); ++i) {
+            tracks[i].id = i;
+        }
+        
+        // If selected track moved, update the selected track index
+        int selected = selectedTrackIndex.load();
+        if (selected == fromIndex) {
+            selectedTrackIndex.store(toIndex);
+        } else if (fromIndex < selected && toIndex >= selected) {
+            selectedTrackIndex.store(selected - 1);
+        } else if (fromIndex > selected && toIndex <= selected) {
+            selectedTrackIndex.store(selected + 1);
+        }
+    }
+}
+
+float AudioEngine::getTrackPeakL(int trackIndex) const
+{
+    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+        return tracks[trackIndex].peakL;
+    }
+    return 0.0f;
+}
+
+float AudioEngine::getTrackPeakR(int trackIndex) const
+{
+    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+        return tracks[trackIndex].peakR;
+    }
+    return 0.0f;
 }
 
 } // namespace dsp

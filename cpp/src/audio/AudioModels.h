@@ -28,6 +28,10 @@ struct Track {
     bool isSolo = false;
     bool isArmed = false;
     bool isSelected = false;
+    
+    // Metering (written by audio thread, read by UI)
+    float peakL = 0.0f;
+    float peakR = 0.0f;
 
     std::vector<AudioItem> items;
     
@@ -50,7 +54,8 @@ enum class EngineCommandType {
     SetTrackArm,
     SetTrackSelect,
     MovePlugin,
-    DeletePlugin
+    DeletePlugin,
+    MoveTrack
 };
 
 struct EngineMessage {

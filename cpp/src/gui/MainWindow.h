@@ -3,6 +3,8 @@
 #include <QMainWindow>
 #include <QSplitter>
 #include <QTabWidget>
+#include <vector>
+#include <QButtonGroup>
 
 namespace dsp {
     class AudioEngine;
@@ -20,6 +22,12 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
+    enum class ArmMode {
+        Standard,
+        Union,
+        Exclusive
+    };
+
     explicit MainWindow(dsp::AudioEngine* engine, juce::AudioDeviceManager* deviceManager, QWidget* parent = nullptr);
     ~MainWindow() override;
 
@@ -31,6 +39,7 @@ protected:
 private slots:
     void selectTrack(int index);
     void openAudioSettings();
+    void reorderTracks(int fromIndex, int toIndex);
 
 private:
     void setupUi();
@@ -51,8 +60,10 @@ private:
     std::vector<class TrackCard*> m_trackCards;
     std::vector<class MixerStrip*> m_mixerStrips;
     class EffectsRack* m_effectsRack;
-    
     int m_selectedTrackIndex = 0;
+    
+    QButtonGroup* m_armModeGroup;
+    ArmMode m_armMode = ArmMode::Standard;
 };
 
 } // namespace gui

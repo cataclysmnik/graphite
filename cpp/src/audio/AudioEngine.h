@@ -37,6 +37,8 @@ public:
     
     // Track State Getters (thread safe-ish for UI)
     int getSelectedTrackIndex() const { return selectedTrackIndex.load(); }
+    float getTrackPeakL(int trackIndex) const;
+    float getTrackPeakR(int trackIndex) const;
     
     // Plugin Management getters for UI
     const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
@@ -50,6 +52,9 @@ public:
     void loadPluginSynchronous(int trackIndex, const juce::String& identifierOrPath);
     void movePluginSynchronous(int trackIndex, int fromIndex, int toIndex);
     void deletePluginSynchronous(int trackIndex, int pluginIndex);
+    
+    // Track management
+    void moveTrackSynchronous(int fromIndex, int toIndex);
     
 private:
     void processMessages();
@@ -70,8 +75,9 @@ private:
     
     // Tracks
     std::vector<Track> tracks;
-
-    // Plugin Management
+    std::mutex m_trackMutex;
+    
+    // JUCE specific for VST3 hostingagement
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::KnownPluginList knownPluginList;
 

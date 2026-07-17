@@ -13,8 +13,8 @@ class MixerPanel : public QScrollArea
     Q_OBJECT
 public:
     explicit MixerPanel(dsp::AudioEngine* engine, QWidget* parent = nullptr);
-
     const std::vector<class MixerStrip*>& getMixerStrips() const { return m_mixerStrips; }
+    void reorderStrips(int fromIndex, int toIndex);
 
 private:
     dsp::AudioEngine* m_engine;

@@ -64,6 +64,14 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
         }
         QSlider::handle:horizontal:hover {
             background: #ffffff;
+        QProgressBar {
+            background-color: #1a1a1c;
+            border: 1px solid #222225;
+            border-radius: 2px;
+            text-align: center;
+        }
+        QProgressBar::chunk {
+            background-color: #00ff00;
         }
     )");
 
@@ -84,10 +92,27 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     // Middle layout: Level Meter | Fader
     QHBoxLayout* middleLayout = new QHBoxLayout();
     
-    // Meter Placeholder
-    m_meterPlaceholder = new QWidget(this);
-    m_meterPlaceholder->setFixedWidth(6);
-    m_meterPlaceholder->setStyleSheet("background-color: #000000; border: 1px solid #222225; border-radius: 3px;");
+    // Meters (L and R)
+    QVBoxLayout* meterLayout = new QVBoxLayout();
+    meterLayout->setSpacing(2);
+    
+    m_meterL = new QProgressBar(this);
+    m_meterL->setOrientation(Qt::Vertical);
+    m_meterL->setRange(0, 100);
+    m_meterL->setFixedWidth(6);
+    m_meterL->setTextVisible(false);
+    
+    m_meterR = new QProgressBar(this);
+    m_meterR->setOrientation(Qt::Vertical);
+    m_meterR->setRange(0, 100);
+    m_meterR->setFixedWidth(6);
+    m_meterR->setTextVisible(false);
+    
+    QHBoxLayout* lrLayout = new QHBoxLayout();
+    lrLayout->setSpacing(1);
+    lrLayout->addWidget(m_meterL);
+    lrLayout->addWidget(m_meterR);
+    meterLayout->addLayout(lrLayout);
     
     // Fader
     m_volFader = new QSlider(Qt::Vertical, this);
@@ -95,7 +120,7 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     m_volFader->setValue(80);
     
     middleLayout->addStretch();
-    middleLayout->addWidget(m_meterPlaceholder);
+    middleLayout->addLayout(meterLayout);
     middleLayout->addSpacing(8);
     middleLayout->addWidget(m_volFader);
     middleLayout->addStretch();
@@ -130,6 +155,24 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     connect(m_btnSolo, &QPushButton::toggled, this, &MixerStrip::onSoloToggled);
     connect(m_volFader, &QSlider::valueChanged, this, &MixerStrip::onVolumeChanged);
     connect(m_panSlider, &QSlider::valueChanged, this, &MixerStrip::onPanChanged);
+    
+    m_meterTimer = new QTimer(this);
+    connect(m_meterTimer, &QTimer::timeout, this, &MixerStrip::updateMeters);
+    m_meterTimer->start(50);
+}
+
+void MixerStrip::updateMeters()
+{
+    if (m_engine && m_engine->isEnginePlaying() && m_trackIndex != -1) {
+        float pL = m_engine->getTrackPeakL(m_trackIndex);
+        float pR = m_engine->getTrackPeakR(m_trackIndex);
+        
+        m_meterL->setValue(static_cast<int>(pL * 100.0f));
+        m_meterR->setValue(static_cast<int>(pR * 100.0f));
+    } else {
+        m_meterL->setValue(0);
+        m_meterR->setValue(0);
+    }
 }
 
 void MixerStrip::mousePressEvent(QMouseEvent* event)

@@ -5,6 +5,7 @@
 #include <QSlider>
 #include <QPushButton>
 #include <QProgressBar>
+#include <QTimer>
 
 namespace dsp {
     class AudioEngine;
@@ -33,6 +34,10 @@ private slots:
 
 public:
     void setSelected(bool selected);
+    void setTrackIndex(int newIndex) { m_trackIndex = newIndex; }
+    
+private slots:
+    void updateMeters();
 
 private:
     int m_trackIndex;
@@ -45,7 +50,9 @@ private:
     QPushButton* m_btnMute;
     QPushButton* m_btnSolo;
     
-    QWidget* m_meterPlaceholder;
+    QProgressBar* m_meterL;
+    QProgressBar* m_meterR;
+    QTimer* m_meterTimer;
 };
 
 } // namespace gui

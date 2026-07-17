@@ -19,6 +19,10 @@
 #include <QScrollArea>
 #include <QIcon>
 #include <QPushButton>
+#include <QListWidget>
+#include <QDropEvent>
+#include <QMetaObject>
+#include <QButtonGroup>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -114,30 +118,79 @@ void MainWindow::setupUi()
     m_tcpPanel = new QWidget();
     m_tcpPanel->setObjectName("TcpPanel");
     QVBoxLayout* tcpLayout = new QVBoxLayout(m_tcpPanel);
-    tcpLayout->setContentsMargins(0, 0, 0, 0);
+    tcpLayout->setContentsMargins(10, 4, 10, 4);
     tcpLayout->setSpacing(0);
     
-    QScrollArea* tcpScroll = new QScrollArea();
-    tcpScroll->setWidgetResizable(true);
-    tcpScroll->setFrameShape(QFrame::NoFrame);
+    // Arm Mode Toolbar
+    QHBoxLayout* armModeLayout = new QHBoxLayout();
+    armModeLayout->setContentsMargins(0, 0, 0, 4);
+    armModeLayout->setSpacing(6);
     
-    QWidget* tcpContainer = new QWidget();
-    QVBoxLayout* tcpContainerLayout = new QVBoxLayout(tcpContainer);
-    tcpContainerLayout->setContentsMargins(5, 5, 5, 5);
-    tcpContainerLayout->setSpacing(5);
+    m_armModeGroup = new QButtonGroup(this);
+    m_armModeGroup->setExclusive(true);
+    
+    QPushButton* btnStandard = new QPushButton("STANDARD");
+    btnStandard->setCheckable(true);
+    btnStandard->setChecked(true);
+    btnStandard->setFixedHeight(20);
+    m_armModeGroup->addButton(btnStandard, (int)ArmMode::Standard);
+    
+    QPushButton* btnUnion = new QPushButton("UNION");
+    btnUnion->setCheckable(true);
+    btnUnion->setFixedHeight(20);
+    m_armModeGroup->addButton(btnUnion, (int)ArmMode::Union);
+    
+    QPushButton* btnExclusive = new QPushButton("EXCLUSIVE");
+    btnExclusive->setCheckable(true);
+    btnExclusive->setFixedHeight(20);
+    m_armModeGroup->addButton(btnExclusive, (int)ArmMode::Exclusive);
+    
+    armModeLayout->addWidget(btnStandard);
+    armModeLayout->addWidget(btnUnion);
+    armModeLayout->addWidget(btnExclusive);
+    
+    tcpLayout->addLayout(armModeLayout);
+    
+    class TcpListWidget : public QListWidget {
+    public:
+        TcpListWidget(MainWindow* mainWindow, QWidget* parent = nullptr) 
+            : QListWidget(parent), m_mainWindow(mainWindow) {
+            setDragDropMode(QAbstractItemView::InternalMove);
+            setSelectionMode(QAbstractItemView::SingleSelection);
+            setFocusPolicy(Qt::NoFocus);
+            setStyleSheet(
+                "QListWidget { background: transparent; border: none; outline: 0; }"
+                "QListWidget::item { padding: 0px; margin-bottom: 4px; }"
+                "QListWidget::item:selected { background: transparent; border: none; }"
+            );
+        }
+    protected:
+        void dropEvent(QDropEvent* event) override {
+            int from = currentRow();
+            QListWidget::dropEvent(event);
+            int to = currentRow();
+            if (from != -1 && to != -1 && from != to) {
+                QMetaObject::invokeMethod(m_mainWindow, "reorderTracks", Qt::QueuedConnection, Q_ARG(int, from), Q_ARG(int, to));
+            }
+        }
+    private:
+        MainWindow* m_mainWindow;
+    };
+    
+    TcpListWidget* tcpList = new TcpListWidget(this, m_tcpPanel);
+    tcpLayout->addWidget(tcpList);
     
     // Add default tracks
     const char* trackNames[] = {"Lead Guitar", "Rhythm Guitar", "Bass", "Drums"};
     for (int i = 0; i < 4; ++i) {
-        TrackCard* card = new TrackCard(i, trackNames[i], m_engine, tcpContainer);
-        tcpContainerLayout->addWidget(card);
+        QListWidgetItem* item = new QListWidgetItem(tcpList);
+        item->setSizeHint(QSize(0, 100)); // TrackCard height
+        
+        TrackCard* card = new TrackCard(i, trackNames[i], m_engine, tcpList);
+        tcpList->setItemWidget(item, card);
         m_trackCards.push_back(card);
         connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
     }
-    tcpContainerLayout->addStretch();
-    
-    tcpScroll->setWidget(tcpContainer);
-    tcpLayout->addWidget(tcpScroll);
 
     // Right Panel (Timeline)
     TimelineContainer* timeline = new TimelineContainer(m_engine, m_topWorkspace);
@@ -328,6 +381,18 @@ void MainWindow::selectTrack(int index)
 {
     m_selectedTrackIndex = index;
     
+    // Apply arming logic based on mode
+    if (index >= 0 && index < m_trackCards.size()) {
+        if (m_armModeGroup->checkedId() == (int)ArmMode::Union) {
+            bool currentArm = m_trackCards[index]->isArmed();
+            m_trackCards[index]->setArmed(!currentArm);
+        } else if (m_armModeGroup->checkedId() == (int)ArmMode::Exclusive) {
+            for (int i = 0; i < m_trackCards.size(); ++i) {
+                m_trackCards[i]->setArmed(i == index);
+            }
+        }
+    }
+    
     // Update TrackCards visually
     for (size_t i = 0; i < m_trackCards.size(); ++i) {
         m_trackCards[i]->setSelected(m_trackCards[i]->property("trackIndex").toInt() == index || (int)i == index);
@@ -359,6 +424,30 @@ void MainWindow::openAudioSettings()
     if (m_deviceManager) {
         gui::AudioSettingsDialog dialog(*m_deviceManager, this);
         dialog.exec();
+    }
+}
+
+void MainWindow::reorderTracks(int fromIndex, int toIndex)
+{
+    if (!m_engine) return;
+    
+    m_engine->moveTrackSynchronous(fromIndex, toIndex);
+    
+    // Update local lists
+    auto card = m_trackCards[fromIndex];
+    m_trackCards.erase(m_trackCards.begin() + fromIndex);
+    m_trackCards.insert(m_trackCards.begin() + toIndex, card);
+    
+    for (int i = 0; i < m_trackCards.size(); ++i) {
+        m_trackCards[i]->setTrackIndex(i);
+    }
+    
+    // Request MixerPanel to reorder
+    if (m_bottomDock->count() > 1) {
+        // MixerPanel is the second tab
+        if (auto mixerPanel = qobject_cast<MixerPanel*>(m_bottomDock->widget(1))) {
+            mixerPanel->reorderStrips(fromIndex, toIndex);
+        }
     }
 }
 

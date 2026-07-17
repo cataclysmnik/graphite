@@ -35,4 +35,27 @@ MixerPanel::MixerPanel(dsp::AudioEngine* engine, QWidget* parent)
     setWidget(container);
 }
 
+void MixerPanel::reorderStrips(int fromIndex, int toIndex)
+{
+    int stripFrom = fromIndex + 1; // 0 is Master
+    int stripTo = toIndex + 1;
+    
+    if (stripFrom >= m_mixerStrips.size() || stripTo >= m_mixerStrips.size()) return;
+    
+    auto strip = m_mixerStrips[stripFrom];
+    m_mixerStrips.erase(m_mixerStrips.begin() + stripFrom);
+    m_mixerStrips.insert(m_mixerStrips.begin() + stripTo, strip);
+    
+    QHBoxLayout* layout = qobject_cast<QHBoxLayout*>(widget()->layout());
+    if (layout) {
+        layout->removeWidget(strip);
+        layout->insertWidget(stripTo, strip);
+    }
+    
+    // Update strip indices
+    for (int i = 1; i < m_mixerStrips.size(); ++i) {
+        m_mixerStrips[i]->setTrackIndex(i - 1);
+    }
+}
+
 } // namespace gui
