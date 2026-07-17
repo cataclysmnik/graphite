@@ -149,12 +149,24 @@ void MixerStrip::setSelected(bool selected)
 
 void MixerStrip::onMuteToggled(bool checked)
 {
-    // TBD Send to engine
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::SetTrackMute;
+        msg.trackIndex = m_trackIndex;
+        msg.boolValue = checked;
+        m_engine->sendMessageFromUI(msg);
+    }
 }
 
 void MixerStrip::onSoloToggled(bool checked)
 {
-    // TBD Send to engine
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::SetTrackSolo;
+        msg.trackIndex = m_trackIndex;
+        msg.boolValue = checked;
+        m_engine->sendMessageFromUI(msg);
+    }
 }
 
 void MixerStrip::onArmToggled(bool checked)
@@ -181,7 +193,13 @@ void MixerStrip::onVolumeChanged(int value)
 
 void MixerStrip::onPanChanged(int value)
 {
-    // TBD Send to engine
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::SetTrackPan;
+        msg.trackIndex = m_trackIndex;
+        msg.floatValue = (value - 50) / 50.0f; // Assuming 0-100 range, where 50 is center
+        m_engine->sendMessageFromUI(msg);
+    }
 }
 
 } // namespace gui

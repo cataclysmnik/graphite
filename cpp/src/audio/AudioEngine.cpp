@@ -162,9 +162,19 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         juce::FloatVectorOperations::multiply(monoInput, 1.0f / (float)numInputChannels, samplesToProcess);
     }
 
+    // Check for any soloed tracks
+    bool anySolo = false;
+    for (const auto& track : tracks) {
+        if (track.isSolo) {
+            anySolo = true;
+            break;
+        }
+    }
+
     // Process each track
     for (auto& track : tracks) {
-        if (track.isMuted) continue;
+        if (track.isMuted && !track.isSolo) continue;
+        if (anySolo && !track.isSolo) continue;
 
         // A temporary buffer for this track's stereo signal
         float trackLeft[MAX_BUFFER] = {0.0f};
@@ -269,6 +279,21 @@ void AudioEngine::processMessages()
                 case EngineCommandType::SetTrackVolume:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].volume = msg.floatValue;
+                    }
+                    break;
+                case EngineCommandType::SetTrackPan:
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        tracks[msg.trackIndex].pan = msg.floatValue;
+                    }
+                    break;
+                case EngineCommandType::SetTrackMute:
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        tracks[msg.trackIndex].isMuted = msg.boolValue;
+                    }
+                    break;
+                case EngineCommandType::SetTrackSolo:
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        tracks[msg.trackIndex].isSolo = msg.boolValue;
                     }
                     break;
                 case EngineCommandType::SetTrackArm:
