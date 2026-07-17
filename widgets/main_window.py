@@ -2222,6 +2222,13 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
         if state == "recording":
             self.timeline.btn_record.setStyleSheet("background-color: #ff0033; border-color: #ff0033; color: #ffffff;")
 
+    def open_settings(self):
+        from widgets.audio_settings import AudioSettingsDialog
+        from PySide6.QtWidgets import QDialog
+        dlg = AudioSettingsDialog(self.audio_engine, self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.update_stream_btn_style()
+
     def on_undo(self):
         if hasattr(self, 'undo_manager'):
             self.undo_manager.undo()
@@ -2229,3 +2236,4 @@ class MainWindow(FramelessWindowMixin, QMainWindow):
     def on_redo(self):
         if hasattr(self, 'undo_manager'):
             self.undo_manager.redo()
+
