@@ -8,7 +8,68 @@
 #include <QFrame>
 #include <QFileDialog>
 
+#include <QListWidget>
+#include <QDropEvent>
+#include <QMenu>
+#include <QAction>
+
 namespace gui {
+
+class EffectsListWidget : public QListWidget {
+public:
+    EffectsListWidget(EffectsRack* rack, dsp::AudioEngine* engine, QWidget* parent = nullptr) 
+        : QListWidget(parent), m_rack(rack), m_engine(engine) {
+        setDragDropMode(QAbstractItemView::InternalMove);
+        setSelectionMode(QAbstractItemView::SingleSelection);
+        setFocusPolicy(Qt::NoFocus);
+        setStyleSheet("QListWidget { background: transparent; border: none; outline: 0; } QListWidget::item { padding: 4px; }");
+    }
+
+    void dropEvent(QDropEvent *event) override {
+        int from = currentRow();
+        QListWidget::dropEvent(event);
+        int to = currentRow(); // after drop
+        
+        if (from != -1 && to != -1 && from != to) {
+            m_engine->movePluginSynchronous(m_rack->getCurrentTrackIndex(), from, to);
+            // Wait slightly for audio engine to catch up, then rebuild UI
+            QTimer::singleShot(50, m_rack, [this](){ m_rack->updateForTrack(m_rack->getCurrentTrackIndex()); });
+        }
+    }
+
+    void contextMenuEvent(QContextMenuEvent* event) override {
+        QListWidgetItem* item = itemAt(event->pos());
+        QMenu menu(this);
+        menu.setStyleSheet("QMenu { background-color: #1a1a1c; color: white; border: 1px solid #333333; } QMenu::item:selected { background-color: #ff0033; }");
+        
+        if (item) {
+            int rowIdx = row(item);
+            QAction* deleteAction = menu.addAction("Delete Plugin");
+            if (menu.exec(event->globalPos()) == deleteAction) {
+                m_engine->deletePluginSynchronous(m_rack->getCurrentTrackIndex(), rowIdx);
+                m_rack->updateForTrack(m_rack->getCurrentTrackIndex());
+            }
+        } else {
+            QAction* addAction = menu.addAction("Add Plugin...");
+            if (menu.exec(event->globalPos()) == addAction) {
+                m_rack->openAddEffectCombo();
+            }
+        }
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
+        QListWidgetItem* item = itemAt(event->pos());
+        if (!item) {
+            m_rack->openAddEffectCombo();
+        } else {
+            int rowIdx = row(item);
+            m_engine->openPluginEditor(m_rack->getCurrentTrackIndex(), rowIdx);
+        }
+    }
+private:
+    EffectsRack* m_rack;
+    dsp::AudioEngine* m_engine;
+};
 
 EffectsRack::EffectsRack(dsp::AudioEngine* engine, QWidget* parent)
     : QWidget(parent), m_engine(engine)
@@ -34,17 +95,26 @@ EffectsRack::EffectsRack(dsp::AudioEngine* engine, QWidget* parent)
             color: #ffffff;
             selection-background-color: #ff0033;
         }
-        .EffectBlock {
-            background-color: #111111;
-            border: 1px solid #222225;
-            border-radius: 4px;
+        QListWidget::item {
+            padding: 0px;
             margin-bottom: 4px;
+            border: 1px solid transparent;
+            border-bottom: 1px solid #222225;
+            border-radius: 4px;
+        }
+        QListWidget::item:hover {
+            background-color: #151515;
+        }
+        QListWidget::item:selected {
+            border: 1px solid #ff0033;
+            background-color: #1a1a1c;
+        }
+        .EffectBlock {
+            background-color: transparent;
         }
         .EffectHeader {
-            background-color: #1a1a1c;
-            border-bottom: 1px solid #222225;
-            border-top-left-radius: 4px;
-            border-top-right-radius: 4px;
+            background-color: transparent;
+            border: none;
         }
     )");
 
@@ -60,6 +130,7 @@ EffectsRack::EffectsRack(dsp::AudioEngine* engine, QWidget* parent)
     headerLayout->addStretch();
     
     m_addEffectCombo = new QComboBox(this);
+    m_addEffectCombo->setMaxVisibleItems(30);
     populatePluginList();
     headerLayout->addWidget(m_addEffectCombo);
     
@@ -72,20 +143,9 @@ EffectsRack::EffectsRack(dsp::AudioEngine* engine, QWidget* parent)
     connect(m_pollTimer, &QTimer::timeout, this, &EffectsRack::onPollTimer);
     m_pollTimer->start(1000); // Check every second
 
-    // Scroll Area for Effects
-    m_scrollArea = new QScrollArea(this);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    m_scrollArea->setStyleSheet("QScrollArea { background: transparent; }");
-    
-    m_scrollContainer = new QWidget();
-    m_scrollLayout = new QVBoxLayout(m_scrollContainer);
-    m_scrollLayout->setContentsMargins(0, 0, 0, 0);
-    m_scrollLayout->setSpacing(8);
-    m_scrollLayout->addStretch();
-    
-    m_scrollArea->setWidget(m_scrollContainer);
-    mainLayout->addWidget(m_scrollArea);
+    // List Widget for Effects (supports Drag & Drop)
+    m_listWidget = new EffectsListWidget(this, m_engine, this);
+    mainLayout->addWidget(m_listWidget);
 }
 
 void EffectsRack::updateForTrack(int trackIndex)
@@ -94,17 +154,14 @@ void EffectsRack::updateForTrack(int trackIndex)
     
     if (!m_engine) return;
     
-    // Clear layout
-    QLayoutItem* item;
-    while ((item = m_scrollLayout->takeAt(0)) != nullptr) {
-        if (QWidget* w = item->widget()) {
-            w->deleteLater();
-        }
-        delete item;
-    }
+    // Clear list
+    m_listWidget->clear();
     
     std::vector<std::string> plugins = m_engine->getTrackPluginNames(trackIndex);
     for (int i = 0; i < plugins.size(); ++i) {
+        QListWidgetItem* item = new QListWidgetItem(m_listWidget);
+        item->setSizeHint(QSize(0, 48));
+        
         QFrame* block = new QFrame();
         block->setProperty("class", "EffectBlock");
         QVBoxLayout* layout = new QVBoxLayout(block);
@@ -113,9 +170,10 @@ void EffectsRack::updateForTrack(int trackIndex)
         
         QWidget* header = new QWidget();
         header->setProperty("class", "EffectHeader");
-        header->setFixedHeight(24);
+        header->setFixedHeight(44);
         QHBoxLayout* headerLayout = new QHBoxLayout(header);
         headerLayout->setContentsMargins(8, 0, 8, 0);
+        headerLayout->setAlignment(Qt::AlignVCenter);
         
         QPushButton* powerBtn = new QPushButton("O");
         powerBtn->setFixedSize(16, 16);
@@ -124,7 +182,7 @@ void EffectsRack::updateForTrack(int trackIndex)
         powerBtn->setStyleSheet("QPushButton:checked { color: #ff0033; border: none; background: transparent; } QPushButton { color: #88888c; border: none; background: transparent; }");
         
         QLabel* title = new QLabel(QString::fromStdString(plugins[i]));
-        title->setStyleSheet("color: #ffffff; font-size: 11px;");
+        title->setStyleSheet("color: #ffffff; font-size: 14px; background-color: transparent; border: none;");
         
         QPushButton* editBtn = new QPushButton("Edit");
         editBtn->setStyleSheet("QPushButton { color: #88888c; font-size: 10px; background: transparent; border: none; } QPushButton:hover { color: #ffffff; }");
@@ -139,10 +197,9 @@ void EffectsRack::updateForTrack(int trackIndex)
         headerLayout->addWidget(editBtn);
         
         layout->addWidget(header);
-        m_scrollLayout->addWidget(block);
+        
+        m_listWidget->setItemWidget(item, block);
     }
-    
-    m_scrollLayout->addStretch();
 }
 
 void EffectsRack::populatePluginList()
@@ -195,6 +252,17 @@ void EffectsRack::onAddEffectActivated(int index)
     }
     
     m_addEffectCombo->setCurrentIndex(0);
+    
+    // Automatically select the new plugin in the list
+    updateForTrack(m_currentTrackIndex);
+    if (m_listWidget->count() > 0) {
+        m_listWidget->setCurrentRow(m_listWidget->count() - 1);
+    }
+}
+
+void EffectsRack::openAddEffectCombo()
+{
+    m_addEffectCombo->showPopup();
 }
 
 } // namespace gui

@@ -140,6 +140,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         }
     }
 
+    // Try to lock the plugin mutex. If the UI thread is currently mutating the plugin chain,
+    // we just output silence this block to avoid crashing or glitching.
+    std::unique_lock<std::mutex> pluginLock(m_pluginMutex, std::try_to_lock);
+    if (!pluginLock.owns_lock()) {
+        return;
+    }
+
     constexpr int MAX_BUFFER = 4096;
     float monoInput[MAX_BUFFER] = {0.0f};
     
@@ -276,14 +283,6 @@ void AudioEngine::processMessages()
                         selectedTrackIndex.store(msg.trackIndex, std::memory_order_relaxed);
                     }
                     break;
-                case EngineCommandType::LoadPlugin:
-                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
-                        if (msg.ptrValue != nullptr) {
-                            auto* proc = static_cast<juce::AudioProcessor*>(msg.ptrValue);
-                            tracks[msg.trackIndex].plugins.push_back(std::unique_ptr<juce::AudioProcessor>(proc));
-                        }
-                    }
-                    break;
                 default:
                     break;
             }
@@ -392,11 +391,42 @@ void AudioEngine::loadPluginSynchronous(int trackIndex, const juce::String& iden
     }
     
     if (newPlugin != nullptr) {
-        EngineMessage msg;
-        msg.type = EngineCommandType::LoadPlugin;
-        msg.trackIndex = trackIndex;
-        msg.ptrValue = newPlugin.release(); // Hand ownership over to the audio thread
-        sendMessageFromUI(msg);
+        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        tracks[trackIndex].plugins.push_back(std::move(newPlugin));
+    }
+}
+
+void AudioEngine::movePluginSynchronous(int trackIndex, int fromIndex, int toIndex)
+{
+    if (trackIndex < 0 || trackIndex >= tracks.size()) return;
+    auto& plugins = tracks[trackIndex].plugins;
+    if (fromIndex < 0 || fromIndex >= plugins.size() || toIndex < 0 || toIndex >= plugins.size() || fromIndex == toIndex) return;
+
+    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    
+    // Check bounds again under lock just in case
+    if (fromIndex < 0 || fromIndex >= plugins.size() || toIndex < 0 || toIndex >= plugins.size()) return;
+    
+    auto item = std::move(plugins[fromIndex]);
+    plugins.erase(plugins.begin() + fromIndex);
+    plugins.insert(plugins.begin() + toIndex, std::move(item));
+}
+
+void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
+{
+    if (trackIndex < 0 || trackIndex >= tracks.size()) return;
+    auto& plugins = tracks[trackIndex].plugins;
+    if (pluginIndex < 0 || pluginIndex >= plugins.size()) return;
+
+    auto* proc = plugins[pluginIndex].get();
+    if (proc) {
+        cachedPluginWindows.erase(proc);
+    }
+
+    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    
+    if (pluginIndex >= 0 && pluginIndex < plugins.size()) {
+        plugins.erase(plugins.begin() + pluginIndex);
     }
 }
 

@@ -45,7 +45,9 @@ enum class EngineCommandType {
     AddAudioItem,
     LoadPlugin,
     SetTrackArm,
-    SetTrackSelect
+    SetTrackSelect,
+    MovePlugin,
+    DeletePlugin
 };
 
 struct EngineMessage {
@@ -53,6 +55,8 @@ struct EngineMessage {
     int trackIndex = -1;
     float floatValue = 0.0f;
     bool boolValue = false;
+    int pluginIndex1 = -1;
+    int pluginIndex2 = -1;
     char stringValue[256] = {0}; // Fixed size for lock-free safety
     void* ptrValue = nullptr;
 };

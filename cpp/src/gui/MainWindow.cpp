@@ -193,8 +193,10 @@ void MainWindow::setupUi()
     effectsLayout->setContentsMargins(0, 0, 0, 0);
     effectsLayout->setSpacing(0);
     
-    m_effectsRack = new gui::EffectsRack(m_engine, effectsTab);
-    m_effectsRack->setFixedWidth(250);
+    QSplitter* effectsSplitter = new QSplitter(Qt::Horizontal, effectsTab);
+    effectsSplitter->setObjectName("EffectsSplitter");
+    
+    m_effectsRack = new gui::EffectsRack(m_engine, effectsSplitter);
     
     // Auto-save audio settings on change
     class AudioSettingsSaver : public juce::ChangeListener {
@@ -218,13 +220,16 @@ void MainWindow::setupUi()
     };
     static AudioSettingsSaver settingsSaver(m_deviceManager);
 
-    gui::SignalFlow* signalFlow = new gui::SignalFlow(m_engine, effectsTab);
+    gui::SignalFlow* signalFlow = new gui::SignalFlow(m_engine, effectsSplitter);
     
-    effectsLayout->addWidget(m_effectsRack);
-    effectsLayout->addWidget(signalFlow);
+    effectsSplitter->addWidget(m_effectsRack);
+    effectsSplitter->addWidget(signalFlow);
+    effectsSplitter->setSizes({500, 500}); // 50/50 split initially
     
-    m_bottomDock->addTab(mixerTab, "MIXER");
+    effectsLayout->addWidget(effectsSplitter);
+    
     m_bottomDock->addTab(effectsTab, "EFFECTS");
+    m_bottomDock->addTab(mixerTab, "MIXER");
 
     m_mainSplitter->addWidget(m_bottomDock);
     m_mainSplitter->setSizes({600, 250});

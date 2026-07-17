@@ -19,6 +19,8 @@ public:
     explicit EffectsRack(dsp::AudioEngine* engine, QWidget* parent = nullptr);
     void updateForTrack(int trackIndex);
     void populatePluginList();
+    int getCurrentTrackIndex() const { return m_currentTrackIndex; }
+    void openAddEffectCombo();
 
 private slots:
     void onAddEffectActivated(int index);
@@ -26,10 +28,8 @@ private slots:
 
 private:
     dsp::AudioEngine* m_engine;
-    QScrollArea* m_scrollArea;
+    class EffectsListWidget* m_listWidget;
     ::QComboBox* m_addEffectCombo;
-    QWidget* m_scrollContainer;
-    QVBoxLayout* m_scrollLayout;
     int m_currentTrackIndex = 0;
     QTimer* m_pollTimer;
     int m_lastKnownPluginCount = -1;

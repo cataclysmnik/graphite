@@ -2,8 +2,11 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_core/juce_core.h>
-#include <array>
+#include <vector>
 #include <atomic>
+#include <unordered_map>
+#include <mutex>
+#include <array>
 #include "AudioModels.h"
 #include "NamEffect.h"
 
@@ -45,6 +48,8 @@ public:
     
     // Call this on the UI thread to instantiate VST3s safely before sending to audio thread
     void loadPluginSynchronous(int trackIndex, const juce::String& identifierOrPath);
+    void movePluginSynchronous(int trackIndex, int fromIndex, int toIndex);
+    void deletePluginSynchronous(int trackIndex, int pluginIndex);
     
 private:
     void processMessages();
@@ -59,6 +64,9 @@ private:
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> playheadTimeSeconds { 0.0 };
     std::atomic<int> selectedTrackIndex { 0 };
+    
+    // Concurrency for plugins
+    std::mutex m_pluginMutex;
     
     // Tracks
     std::vector<Track> tracks;
