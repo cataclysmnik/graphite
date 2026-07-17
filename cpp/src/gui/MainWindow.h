@@ -30,6 +30,7 @@ protected:
 
 private slots:
     void selectTrack(int index);
+    void openAudioSettings();
 
 private:
     void setupUi();

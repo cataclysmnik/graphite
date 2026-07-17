@@ -2,6 +2,7 @@
 #include "CustomTitleBar.h"
 #include "TrackCard.h"
 #include "Timeline.h"
+#include "AudioSettingsDialog.h"
 #include "MixerPanel.h"
 #include "MixerStrip.h"
 #include "EffectsRack.h"
@@ -97,6 +98,7 @@ void MainWindow::setupUi()
     toolbarLayout->addStretch();
     
     QPushButton* btnSettings = new QPushButton("Audio Settings...", toolbar);
+    connect(btnSettings, &QPushButton::clicked, this, &MainWindow::openAudioSettings);
     toolbarLayout->addWidget(btnSettings);
     
     mainLayout->addWidget(toolbar);
@@ -194,6 +196,28 @@ void MainWindow::setupUi()
     m_effectsRack = new gui::EffectsRack(m_engine, effectsTab);
     m_effectsRack->setFixedWidth(250);
     
+    // Auto-save audio settings on change
+    class AudioSettingsSaver : public juce::ChangeListener {
+    public:
+        AudioSettingsSaver(juce::AudioDeviceManager* dm) : manager(dm) {
+            manager->addChangeListener(this);
+        }
+        ~AudioSettingsSaver() {
+            manager->removeChangeListener(this);
+        }
+        void changeListenerCallback(juce::ChangeBroadcaster*) override {
+            juce::File appDataDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("GuitarDaw");
+            if (!appDataDir.exists()) appDataDir.createDirectory();
+            juce::File audioSettingsFile = appDataDir.getChildFile("AudioSettings.xml");
+            if (auto xml = manager->createStateXml()) {
+                xml->writeTo(audioSettingsFile);
+            }
+        }
+    private:
+        juce::AudioDeviceManager* manager;
+    };
+    static AudioSettingsSaver settingsSaver(m_deviceManager);
+
     gui::SignalFlow* signalFlow = new gui::SignalFlow(m_engine, effectsTab);
     
     effectsLayout->addWidget(m_effectsRack);
@@ -213,12 +237,6 @@ void MainWindow::setupUi()
     });
     connect(btnPause, &QPushButton::clicked, [this]() {
         if (m_engine) m_engine->setPlaying(false);
-    });
-    connect(btnSettings, &QPushButton::clicked, [this]() {
-        if (m_deviceManager) {
-            gui::AudioSettingsDialog dialog(*m_deviceManager, this);
-            dialog.exec();
-        }
     });
 }
 
@@ -328,6 +346,14 @@ void MainWindow::selectTrack(int index)
     // Update EffectsRack
     if (m_effectsRack) {
         m_effectsRack->updateForTrack(index);
+    }
+}
+
+void MainWindow::openAudioSettings()
+{
+    if (m_deviceManager) {
+        gui::AudioSettingsDialog dialog(*m_deviceManager, this);
+        dialog.exec();
     }
 }
 
