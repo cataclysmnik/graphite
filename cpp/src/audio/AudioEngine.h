@@ -34,6 +34,13 @@ public:
     void setPlaying(bool shouldPlay);
     void setRecording(bool shouldRecord);
     void setPlayheadPosition(double timeSecs);
+    
+    // Audio Item interactions
+    void deleteAudioItem(int itemId);
+    void moveAudioItem(int itemId, int targetTrackIndex, double newStartTimeSecs);
+    void setAudioItemSelection(int itemId, bool isSelected);
+    void clearAudioItemSelection();
+    
     bool isEnginePlaying() const { return isPlaying.load(); }
     bool isEngineRecording() const { return isRecording.load(); }
     double getPlayheadTime() const { return playheadTimeSeconds.load(); }

@@ -14,6 +14,7 @@ struct AudioItem {
     double startTimeSecs;
     double offsetSecs;
     double durationSecs;
+    bool isSelected = false;
     
     // In a real application, we'd store a lock-free reference to an audio buffer pool
     std::shared_ptr<juce::AudioBuffer<float>> buffer;
@@ -57,13 +58,18 @@ enum class EngineCommandType {
     DeletePlugin,
     MoveTrack,
     SetRecording,
-    SetPlayheadPosition
+    SetPlayheadPosition,
+    DeleteAudioItem,
+    MoveAudioItem,
+    SelectAudioItem
 };
 
 struct EngineMessage {
     EngineCommandType type;
     int trackIndex = -1;
+    int itemId = -1;
     float floatValue = 0.0f;
+    double doubleValue = 0.0;
     bool boolValue = false;
     int pluginIndex1 = -1;
     int pluginIndex2 = -1;

@@ -6,6 +6,8 @@
 #include <QWheelEvent>
 #include <QVBoxLayout>
 #include <QScrollBar>
+#include <QMenu>
+#include <QKeyEvent>
 
 namespace gui {
 
@@ -118,6 +120,7 @@ TimelineLanesWidget::TimelineLanesWidget(dsp::AudioEngine* engine, QWidget* pare
     : QWidget(parent), m_engine(engine)
 {
     setMinimumSize(5000, 1000); // Allow scrolling
+    setFocusPolicy(Qt::StrongFocus); // Accept keyboard events for deletion
     
     // Timer to update playhead position at ~60fps
     connect(&m_playheadTimer, &QTimer::timeout, this, &TimelineLanesWidget::onPlayheadTimerTick);
@@ -199,14 +202,22 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
                 QRect clipRect(startX, yOffset + 10, itemW, trackHeight - 20);
                 
                 // Nothing Aesthetic: Transparent background, white dotted/solid border
-                painter.fillRect(clipRect, QColor("#111111"));
+                if (item.isSelected) {
+                    painter.fillRect(clipRect, QColor("#333333")); // Lighter background for selection
+                    painter.setPen(QPen(QColor("#ffffff"), 2)); // Thicker border
+                } else {
+                    painter.fillRect(clipRect, QColor("#111111"));
+                    painter.setPen(QPen(QColor("#ffffff"), 1));
+                }
                 
-                // Border
-                painter.setPen(QPen(QColor("#ffffff"), 1));
                 painter.drawRect(clipRect);
                 
                 // Draw name or ID placeholder (Monospaced look if possible)
-                painter.setPen(QPen(QColor("#aaaaaa"), 1));
+                if (item.isSelected) {
+                    painter.setPen(QPen(QColor("#ffffff"), 1));
+                } else {
+                    painter.setPen(QPen(QColor("#aaaaaa"), 1));
+                }
                 QFont f = painter.font();
                 f.setFamily("Courier"); // Or whatever monospace is available
                 f.setPixelSize(11);
@@ -341,6 +352,29 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
             
             yOffset += (trackHeight + trackMargin);
         }
+        
+        // Draw ghost drag clip
+        if (m_draggingItemId != -1) {
+            for (const auto& track : tracks) {
+                for (const auto& item : track.items) {
+                    if (item.id == m_draggingItemId) {
+                        int ghostX = m_previewStartTime * m_pixelsPerSecond;
+                        int itemW = item.durationSecs * m_pixelsPerSecond;
+                        int ghostY = m_draggingTrackIndex * (trackHeight + trackMargin) + 10;
+                        
+                        QRect ghostRect(ghostX, ghostY, itemW, trackHeight - 20);
+                        
+                        // Transparent ghost effect
+                        QColor ghostColor = QColor("#ffffff");
+                        ghostColor.setAlpha(80);
+                        painter.fillRect(ghostRect, ghostColor);
+                        painter.setPen(QPen(QColor("#ffffff"), 1, Qt::DashLine));
+                        painter.drawRect(ghostRect);
+                        break;
+                    }
+                }
+            }
+        }
     }
     
     // Draw Playhead (Nothing Red)
@@ -369,17 +403,146 @@ void TimelineLanesWidget::setPlayheadFromMouse(QMouseEvent* event)
     m_engine->setPlayheadPosition(timeSecs);
 }
 
+
+HitTestResult TimelineLanesWidget::hitTest(const QPoint& pos)
+{
+    HitTestResult result;
+    if (!m_engine) return result;
+    
+    auto tracks = m_engine->getTracksSnapshot();
+    int trackHeight = 100;
+    int trackMargin = 4;
+    int yOffset = 0;
+    
+    for (size_t i = 0; i < tracks.size(); ++i) {
+        if (pos.y() >= yOffset && pos.y() <= yOffset + trackHeight) {
+            result.trackIndex = i;
+            
+            // Check items
+            for (const auto& item : tracks[i].items) {
+                int startX = item.startTimeSecs * m_pixelsPerSecond;
+                int itemW = item.durationSecs * m_pixelsPerSecond;
+                QRect clipRect(startX, yOffset + 10, itemW, trackHeight - 20);
+                
+                if (clipRect.contains(pos)) {
+                    result.itemId = item.id;
+                    return result; // Found the item
+                }
+            }
+            return result; // Found track, no item
+        }
+        yOffset += (trackHeight + trackMargin);
+    }
+    return result;
+}
+
 void TimelineLanesWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        setPlayheadFromMouse(event);
+        HitTestResult hit = hitTest(event->pos());
+        
+        if (hit.itemId != -1) {
+            // Clicked on a clip
+            m_engine->clearAudioItemSelection();
+            m_engine->setAudioItemSelection(hit.itemId, true);
+            
+            // Start drag
+            m_draggingItemId = hit.itemId;
+            m_draggingTrackIndex = hit.trackIndex;
+            
+            auto tracks = m_engine->getTracksSnapshot();
+            for (const auto& item : tracks[hit.trackIndex].items) {
+                if (item.id == hit.itemId) {
+                    int startX = item.startTimeSecs * m_pixelsPerSecond;
+                    m_dragOffsetX = event->x() - startX;
+                    m_previewStartTime = item.startTimeSecs;
+                    break;
+                }
+            }
+            update();
+        } else {
+            // Clicked empty space
+            m_engine->clearAudioItemSelection();
+            setPlayheadFromMouse(event);
+        }
+    } else if (event->button() == Qt::RightButton) {
+        HitTestResult hit = hitTest(event->pos());
+        if (hit.itemId != -1) {
+            m_engine->clearAudioItemSelection();
+            m_engine->setAudioItemSelection(hit.itemId, true);
+            update();
+        }
     }
 }
 
 void TimelineLanesWidget::mouseMoveEvent(QMouseEvent* event)
 {
     if (event->buttons() & Qt::LeftButton) {
-        setPlayheadFromMouse(event);
+        if (m_draggingItemId != -1) {
+            // Dragging a clip
+            double newStartX = event->x() - m_dragOffsetX;
+            m_previewStartTime = std::max(0.0, newStartX / m_pixelsPerSecond);
+            
+            // Determine new track
+            int trackHeight = 100;
+            int trackMargin = 4;
+            int newTrackIndex = event->y() / (trackHeight + trackMargin);
+            if (m_engine) {
+                size_t numTracks = m_engine->getTracksSnapshot().size();
+                newTrackIndex = std::clamp(newTrackIndex, 0, (int)numTracks - 1);
+                m_draggingTrackIndex = newTrackIndex;
+            }
+            update();
+        } else {
+            // Scrubbing playhead
+            setPlayheadFromMouse(event);
+        }
+    }
+}
+
+void TimelineLanesWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        if (m_draggingItemId != -1 && m_engine) {
+            m_engine->moveAudioItem(m_draggingItemId, m_draggingTrackIndex, m_previewStartTime);
+            m_draggingItemId = -1;
+            update();
+        }
+    }
+}
+
+void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
+{
+    if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+        if (m_engine) {
+            // Find selected items and delete them
+            auto tracks = m_engine->getTracksSnapshot();
+            for (const auto& track : tracks) {
+                for (const auto& item : track.items) {
+                    if (item.isSelected) {
+                        m_engine->deleteAudioItem(item.id);
+                    }
+                }
+            }
+            update();
+        }
+    } else {
+        QWidget::keyPressEvent(event);
+    }
+}
+
+void TimelineLanesWidget::contextMenuEvent(QContextMenuEvent* event)
+{
+    HitTestResult hit = hitTest(event->pos());
+    if (hit.itemId != -1 && m_engine) {
+        QMenu menu(this);
+        QAction* deleteAction = menu.addAction("Delete Clip");
+        
+        QAction* selected = menu.exec(event->globalPos());
+        if (selected == deleteAction) {
+            m_engine->deleteAudioItem(hit.itemId);
+            update();
+        }
     }
 }
 

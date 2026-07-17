@@ -355,6 +355,41 @@ void AudioEngine::setPlayheadPosition(double timeSecs)
     sendMessageFromUI(msg);
 }
 
+void AudioEngine::deleteAudioItem(int itemId)
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::DeleteAudioItem;
+    msg.itemId = itemId;
+    sendMessageFromUI(msg);
+}
+
+void AudioEngine::moveAudioItem(int itemId, int targetTrackIndex, double newStartTimeSecs)
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::MoveAudioItem;
+    msg.itemId = itemId;
+    msg.trackIndex = targetTrackIndex;
+    msg.doubleValue = newStartTimeSecs;
+    sendMessageFromUI(msg);
+}
+
+void AudioEngine::setAudioItemSelection(int itemId, bool isSelected)
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::SelectAudioItem;
+    msg.itemId = itemId;
+    msg.boolValue = isSelected;
+    sendMessageFromUI(msg);
+}
+
+void AudioEngine::clearAudioItemSelection()
+{
+    EngineMessage msg;
+    msg.type = EngineCommandType::SelectAudioItem;
+    msg.itemId = -1; // -1 means clear all
+    sendMessageFromUI(msg);
+}
+
 void AudioEngine::processMessages()
 {
     // Read messages from the lock-free queue (called from High-Priority Audio Thread)
@@ -450,6 +485,60 @@ void AudioEngine::processMessages()
                         selectedTrackIndex.store(msg.trackIndex, std::memory_order_relaxed);
                     }
                     break;
+                case EngineCommandType::DeleteAudioItem: {
+                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    for (auto& track : tracks) {
+                        auto it = std::remove_if(track.items.begin(), track.items.end(),
+                                                 [&msg](const AudioItem& item) { return item.id == msg.itemId; });
+                        if (it != track.items.end()) {
+                            track.items.erase(it, track.items.end());
+                            break;
+                        }
+                    }
+                    break;
+                }
+                case EngineCommandType::MoveAudioItem: {
+                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    AudioItem movedItem;
+                    bool found = false;
+                    
+                    for (auto& track : tracks) {
+                        auto it = std::find_if(track.items.begin(), track.items.end(),
+                                               [&msg](const AudioItem& item) { return item.id == msg.itemId; });
+                        if (it != track.items.end()) {
+                            movedItem = *it;
+                            track.items.erase(it);
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (found && msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        movedItem.startTimeSecs = msg.doubleValue;
+                        tracks[msg.trackIndex].items.push_back(movedItem);
+                    }
+                    break;
+                }
+                case EngineCommandType::SelectAudioItem: {
+                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    if (msg.itemId == -1) {
+                        for (auto& track : tracks) {
+                            for (auto& item : track.items) {
+                                item.isSelected = false;
+                            }
+                        }
+                    } else {
+                        for (auto& track : tracks) {
+                            for (auto& item : track.items) {
+                                if (item.id == msg.itemId) {
+                                    item.isSelected = msg.boolValue;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
                 default:
                     break;
             }
