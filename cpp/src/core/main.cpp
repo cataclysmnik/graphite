@@ -24,10 +24,35 @@ int main(int argc, char* argv[])
 
     // Setup JUCE Audio Device Manager
     juce::AudioDeviceManager deviceManager;
-    juce::String err = deviceManager.initialiseWithDefaultDevices(2, 2);
+    
+    // Determine Settings File Location: %APPDATA%/GuitarDaw/AudioSettings.xml
+    juce::File appDataDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("GuitarDaw");
+    if (!appDataDir.exists()) {
+        appDataDir.createDirectory();
+    }
+    juce::File audioSettingsFile = appDataDir.getChildFile("AudioSettings.xml");
+    
+    // Attempt to load settings
+    std::unique_ptr<juce::XmlElement> savedAudioState = nullptr;
+    if (audioSettingsFile.existsAsFile()) {
+        savedAudioState = juce::XmlDocument::parse(audioSettingsFile);
+    }
+    
+    juce::String err;
+    if (savedAudioState != nullptr) {
+        err = deviceManager.initialise(2, 2, savedAudioState.get(), true);
+    } else {
+        err = deviceManager.initialiseWithDefaultDevices(2, 2);
+    }
+    
+    // Fallback if loading failed or returned error
+    if (err.isNotEmpty() && savedAudioState != nullptr) {
+        std::cout << "Error loading saved audio settings: " << err.toStdString() << ". Reverting to default.\n";
+        err = deviceManager.initialiseWithDefaultDevices(2, 2);
+    }
     
     if (err.isNotEmpty()) {
-        std::cout << "Error initializing audio device: " << err.toStdString() << "\n";
+        std::cout << "Error initializing default audio device: " << err.toStdString() << "\n";
     }
 
     if (auto* device = deviceManager.getCurrentAudioDevice()) {
@@ -38,13 +63,19 @@ int main(int argc, char* argv[])
     deviceManager.addAudioCallback(&engine);
 
     // Create the Main Window
-    gui::MainWindow window(&engine);
+    gui::MainWindow window(&engine, &deviceManager);
     window.showMaximized();
 
     int result = app.exec();
 
     // Clean up
     deviceManager.removeAudioCallback(&engine);
+    
+    // Save audio settings on exit
+    std::unique_ptr<juce::XmlElement> audioState(deviceManager.createStateXml());
+    if (audioState != nullptr) {
+        audioState->writeTo(audioSettingsFile, juce::XmlElement::TextFormat());
+    }
 
     return result;
 }

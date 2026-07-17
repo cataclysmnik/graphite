@@ -2,7 +2,9 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 #include <juce_core/juce_core.h>
+#include <juce_audio_processors/juce_audio_processors.h>
 
 namespace dsp {
 
@@ -24,8 +26,13 @@ struct Track {
     float pan = 0.0f;    // -1.0 (Left) to 1.0 (Right)
     bool isMuted = false;
     bool isSolo = false;
+    bool isArmed = false;
+    bool isSelected = false;
 
     std::vector<AudioItem> items;
+    
+    // The plugin chain for this track
+    std::vector<std::unique_ptr<juce::AudioProcessor>> plugins;
 };
 
 // Messaging structures for the lock-free queue (Qt -> Audio Thread)
@@ -36,14 +43,18 @@ enum class EngineCommandType {
     SetTrackVolume,
     AddTrack,
     AddAudioItem,
-    LoadNamModel
+    LoadPlugin,
+    SetTrackArm,
+    SetTrackSelect
 };
 
 struct EngineMessage {
     EngineCommandType type;
-    int trackId = -1;
-    float value = 0.0f;
-    std::string* stringPayload = nullptr; // Pointer for passing strings across thread safely
+    int trackIndex = -1;
+    float floatValue = 0.0f;
+    bool boolValue = false;
+    char stringValue[256] = {0}; // Fixed size for lock-free safety
+    void* ptrValue = nullptr;
 };
 
 } // namespace dsp

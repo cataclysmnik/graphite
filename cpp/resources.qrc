@@ -1,0 +1,12 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file alias="icons/play.svg">../public/icons/play.svg</file>
+    <file alias="icons/pause.svg">../public/icons/pause.svg</file>
+    <file alias="icons/record.svg">../public/icons/record.svg</file>
+    <file alias="icons/stop.svg">../public/icons/stop.svg</file>
+    <file alias="icons/previous.svg">../public/icons/previous.svg</file>
+    <file alias="icons/fastforward.svg">../public/icons/fastforward.svg</file>
+    <file alias="icons/pin.svg">../public/icons/pin.svg</file>
+    <file alias="icons/unpin.svg">../public/icons/unpin.svg</file>
+</qresource>
+</RCC>

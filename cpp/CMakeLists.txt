@@ -48,7 +48,7 @@ set(CMAKE_AUTOUIC ON)
 
 set(CMAKE_PREFIX_PATH "D:/Qt/6.11.1/msvc2022_64" CACHE PATH "Path to Qt" FORCE)
 
-find_package(Qt6 COMPONENTS Core Gui Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Core Gui Widgets Svg REQUIRED)
 
 # -----------------------------------------------------------------------------
 # Target Configuration
@@ -57,10 +57,18 @@ add_executable(GuitarDAW_CPP
     src/core/main.cpp
     src/audio/AudioEngine.cpp
     src/audio/NamEffect.cpp
+    src/audio/NamAudioProcessor.cpp
     src/gui/AudioSettingsDialog.cpp
     src/gui/StyleTheme.cpp
     src/gui/CustomTitleBar.cpp
     src/gui/MainWindow.cpp
+    src/gui/TrackCard.cpp
+    src/gui/Timeline.cpp
+    src/gui/MixerStrip.cpp
+    src/gui/MixerPanel.cpp
+    src/gui/EffectsRack.cpp
+    src/gui/SignalFlow.cpp
+    resources.qrc
 )
 
 target_include_directories(GuitarDAW_CPP PRIVATE
@@ -77,6 +85,9 @@ target_sources(GuitarDAW_CPP PRIVATE ${NAM_SOURCES})
 # Force NAM Core to use float processing instead of double to match JUCE and save CPU
 target_compile_definitions(GuitarDAW_CPP PRIVATE NAM_SAMPLE_FLOAT)
 
+# Disable JUCE assertions to prevent debug breaks caused by buggy third-party plugins (e.g. Neural DSP background thread callbacks)
+target_compile_definitions(GuitarDAW_CPP PRIVATE JUCE_DISABLE_ASSERTS=1)
+
 # Enable ASIO globally for the juce_audio_devices module
 target_compile_definitions(juce_audio_devices INTERFACE JUCE_ASIO=1)
 target_include_directories(juce_audio_devices INTERFACE
@@ -86,9 +97,10 @@ target_include_directories(juce_audio_devices INTERFACE
 )
 
 # We link JUCE recommended targets (juce_audio_devices, juce_core, etc.)
-# We link Qt6::Widgets
+# We link Qt6::Widgets and Qt6::Svg
 target_link_libraries(GuitarDAW_CPP PRIVATE
     Qt6::Widgets
+    Qt6::Svg
     juce::juce_audio_devices
     juce::juce_audio_formats
     juce::juce_audio_processors
@@ -97,6 +109,8 @@ target_link_libraries(GuitarDAW_CPP PRIVATE
     juce::juce_data_structures
     juce::juce_events
 )
+
+target_compile_definitions(GuitarDAW_CPP PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_VST=0 JUCE_PLUGINHOST_AU=0)
 
 # -----------------------------------------------------------------------------
 # Deployment Setup (Windows)

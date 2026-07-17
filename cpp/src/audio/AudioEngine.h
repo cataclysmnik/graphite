@@ -9,7 +9,7 @@
 
 namespace dsp {
 
-class AudioEngine : public juce::AudioIODeviceCallback {
+class AudioEngine : public juce::AudioIODeviceCallback, public juce::Timer {
 public:
     AudioEngine();
     ~AudioEngine() override;
@@ -30,8 +30,22 @@ public:
     void sendMessageFromUI(const EngineMessage& msg);
     void setPlaying(bool shouldPlay);
     bool isEnginePlaying() const { return isPlaying.load(); }
-    void loadNamModel(const std::string& path);
-
+    double getPlayheadTime() const { return playheadTimeSeconds.load(); }
+    
+    // Track State Getters (thread safe-ish for UI)
+    int getSelectedTrackIndex() const { return selectedTrackIndex.load(); }
+    
+    // Plugin Management getters for UI
+    const juce::KnownPluginList& getKnownPluginList() const { return knownPluginList; }
+    void triggerPluginScan() { scanForPlugins(); }
+    
+    // UI can call this (carefully) to display plugin names in the effects rack
+    std::vector<std::string> getTrackPluginNames(int trackIndex) const;
+    void openPluginEditor(int trackIndex, int pluginIndex);
+    
+    // Call this on the UI thread to instantiate VST3s safely before sending to audio thread
+    void loadPluginSynchronous(int trackIndex, const juce::String& identifierOrPath);
+    
 private:
     void processMessages();
 
@@ -43,12 +57,26 @@ private:
     // Engine State
     std::atomic<bool> isPlaying { false };
     std::atomic<double> currentSampleRate { 44100.0 };
+    std::atomic<double> playheadTimeSeconds { 0.0 };
+    std::atomic<int> selectedTrackIndex { 0 };
     
     // Tracks
     std::vector<Track> tracks;
 
-    // Neural Amp Modeler DSP
-    NamEffect m_namEffect;
+    // Plugin Management
+    juce::AudioPluginFormatManager pluginFormatManager;
+    juce::KnownPluginList knownPluginList;
+
+    // Load/Save plugin list
+    void loadKnownPlugins();
+    void saveKnownPlugins();
+    void scanForPlugins(); // Triggers async scan
+    
+    // juce::Timer callback for incremental scanning on the main thread
+    void timerCallback() override;
+
+private:
+    std::unique_ptr<juce::PluginDirectoryScanner> m_activeScanner;
 
     // Temporary basic test oscillator state
     double currentPhase = 0.0;
