@@ -188,6 +188,17 @@ void MainWindow::setupUi()
         m_trackCards.push_back(card);
         connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
     }
+    
+    // Add Track Button
+    QPushButton* addTrackBtn = new QPushButton("+ Add Track");
+    addTrackBtn->setStyleSheet(
+        "QPushButton { background: #333333; color: white; border: none; padding: 10px; font-weight: bold; font-size: 14px; }"
+        "QPushButton:hover { background: #444444; }"
+        "QPushButton:pressed { background: #222222; }"
+    );
+    tcpLayout->addWidget(addTrackBtn);
+    connect(addTrackBtn, &QPushButton::clicked, this, &MainWindow::addTrack);
+
 
     // Right Panel (Timeline)
     QWidget* timelinePanel = new QWidget();
@@ -248,6 +259,11 @@ void MainWindow::setupUi()
     QShortcut* zoomOutShortcut = new QShortcut(QKeySequence("Ctrl+-"), this);
     zoomOutShortcut->setContext(Qt::ApplicationShortcut);
     connect(zoomOutShortcut, &QShortcut::activated, this, &MainWindow::zoomOut);
+    
+    // Add Track shortcut
+    QShortcut* addTrackShortcut = new QShortcut(QKeySequence("Ctrl+T"), this);
+    addTrackShortcut->setContext(Qt::ApplicationShortcut);
+    connect(addTrackShortcut, &QShortcut::activated, this, &MainWindow::addTrack);
     
     // Record shortcut
     QShortcut* recordShortcut = new QShortcut(QKeySequence("R"), this);
@@ -494,9 +510,13 @@ void MainWindow::reorderTracks(int fromIndex, int toIndex)
 {
     if (!m_engine) return;
     
-    m_engine->moveTrackSynchronous(fromIndex, toIndex);
+    dsp::EngineMessage msg;
+    msg.type = dsp::EngineCommandType::MoveTrack;
+    msg.trackIndex = fromIndex;
+    msg.pluginIndex1 = toIndex; // Hack to use this field for toIndex
+    m_engine->sendMessageFromUI(msg);
     
-    // Update local lists
+    // Reorder our local cache
     auto card = m_trackCards[fromIndex];
     m_trackCards.erase(m_trackCards.begin() + fromIndex);
     m_trackCards.insert(m_trackCards.begin() + toIndex, card);
@@ -515,6 +535,39 @@ void MainWindow::reorderTracks(int fromIndex, int toIndex)
         if (auto mixerPanel = qobject_cast<MixerPanel*>(m_bottomDock->widget(1))) {
             mixerPanel->reorderStrips(fromIndex, toIndex);
         }
+    }
+}
+
+void MainWindow::addTrack()
+{
+    if (!m_engine) return;
+    
+    // Find the tcpList widget
+    QListWidget* tcpList = m_tcpPanel->findChild<QListWidget*>();
+    if (!tcpList) return;
+    
+    int newTrackIndex = m_trackCards.size();
+    QString trackName = QString("Track %1").arg(newTrackIndex + 1);
+    
+    // Send to backend
+    dsp::EngineMessage msg;
+    msg.type = dsp::EngineCommandType::AddTrack;
+    std::strncpy(msg.stringValue, trackName.toStdString().c_str(), sizeof(msg.stringValue) - 1);
+    m_engine->sendMessageFromUI(msg);
+    
+    // Add to UI
+    QListWidgetItem* item = new QListWidgetItem(tcpList);
+    item->setSizeHint(QSize(0, 100)); // TrackCard height
+    
+    TrackCard* card = new TrackCard(newTrackIndex, trackName, m_engine, tcpList);
+    tcpList->setItemWidget(item, card);
+    m_trackCards.push_back(card);
+    connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
+    
+    // Notify timeline to redraw
+    auto* timeline = findChild<TimelineContainer*>();
+    if (timeline) {
+        timeline->update();
     }
 }
 

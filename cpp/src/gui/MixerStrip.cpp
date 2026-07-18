@@ -84,10 +84,11 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     panLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(panLabel);
     
-    m_panSlider = new QSlider(Qt::Horizontal, this);
-    m_panSlider->setRange(-50, 50);
-    m_panSlider->setValue(0);
-    mainLayout->addWidget(m_panSlider);
+    m_panSlider = new CustomKnob(this);
+    m_panSlider->setRange(0, 100);
+    m_panSlider->setValue(50);
+    m_panSlider->setFixedSize(40, 40);
+    mainLayout->addWidget(m_panSlider, 0, Qt::AlignHCenter);
     
     // Middle layout: Level Meter | Fader
     QHBoxLayout* middleLayout = new QHBoxLayout();
@@ -96,17 +97,11 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     QVBoxLayout* meterLayout = new QVBoxLayout();
     meterLayout->setSpacing(2);
     
-    m_meterL = new QProgressBar(this);
-    m_meterL->setOrientation(Qt::Vertical);
-    m_meterL->setRange(0, 100);
+    m_meterL = new LevelMeter(Qt::Vertical, this);
     m_meterL->setFixedWidth(6);
-    m_meterL->setTextVisible(false);
     
-    m_meterR = new QProgressBar(this);
-    m_meterR->setOrientation(Qt::Vertical);
-    m_meterR->setRange(0, 100);
+    m_meterR = new LevelMeter(Qt::Vertical, this);
     m_meterR->setFixedWidth(6);
-    m_meterR->setTextVisible(false);
     
     QHBoxLayout* lrLayout = new QHBoxLayout();
     lrLayout->setSpacing(1);
@@ -158,7 +153,7 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
     
     m_meterTimer = new QTimer(this);
     connect(m_meterTimer, &QTimer::timeout, this, &MixerStrip::updateMeters);
-    m_meterTimer->start(50);
+    m_meterTimer->start(16);
 }
 
 void MixerStrip::updateMeters()
@@ -167,11 +162,18 @@ void MixerStrip::updateMeters()
         float pL = m_engine->getTrackPeakL(m_trackIndex);
         float pR = m_engine->getTrackPeakR(m_trackIndex);
         
-        m_meterL->setValue(static_cast<int>(pL * 100.0f));
-        m_meterR->setValue(static_cast<int>(pR * 100.0f));
+        m_meterL->setLevel(pL);
+        m_meterR->setLevel(pR);
+        
+        // Synchronize pan state from engine
+        float enginePan = m_engine->getTrackPan(m_trackIndex);
+        int panVal = static_cast<int>((enginePan * 50.0f) + 50.0f);
+        m_panSlider->blockSignals(true);
+        m_panSlider->setValue(panVal);
+        m_panSlider->blockSignals(false);
     } else {
-        m_meterL->setValue(0);
-        m_meterR->setValue(0);
+        m_meterL->setLevel(0.0f);
+        m_meterR->setLevel(0.0f);
     }
 }
 

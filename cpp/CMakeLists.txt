@@ -68,6 +68,8 @@ add_executable(GuitarDAW_CPP
     src/gui/MixerPanel.cpp
     src/gui/EffectsRack.cpp
     src/gui/SignalFlow.cpp
+    src/gui/CustomKnob.cpp
+    src/gui/LevelMeter.cpp
     resources.qrc
 )
 

@@ -42,6 +42,7 @@ private slots:
     void selectTrack(int index);
     void openAudioSettings();
     void reorderTracks(int fromIndex, int toIndex);
+    void addTrack();
     void togglePlayback();
     void toggleRecording();
     void zoomIn();

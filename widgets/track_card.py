@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor
 from widgets.level_meter import LevelMeter
+from widgets.knob import CustomKnob
 
 class WheelIgnoredComboBox(QComboBox):
     def wheelEvent(self, event):
@@ -134,6 +135,13 @@ class TrackCard(QFrame):
         self.controls_layout.addWidget(self.btn_mute)
         self.controls_layout.addWidget(self.btn_solo)
         self.controls_layout.addWidget(self.btn_arm)
+        
+        self.pan_knob = CustomKnob(label="PAN", min_val=-1.0, max_val=1.0, default_val=0.0, unit="", decimals=2)
+        self.pan_knob.setMinimumSize(45, 65)  # Make it small
+        self.pan_knob.setValue(self.track.pan)
+        self.pan_knob.valueChanged.connect(self.on_pan_changed)
+        self.controls_layout.addWidget(self.pan_knob)
+        
         self.controls_layout.addStretch()
         
         details_layout.addWidget(self.controls_widget)
@@ -149,8 +157,22 @@ class TrackCard(QFrame):
         main_layout.addLayout(details_layout)
         
         # --- PANEL 2: Custom vertical LED VU Meter ---
-        self.level_meter = LevelMeter()
-        main_layout.addWidget(self.level_meter)
+        self.meters_layout = QVBoxLayout()
+        self.meters_layout.setContentsMargins(0, 0, 0, 0)
+        self.meters_layout.setSpacing(2)
+        
+        self.level_meter_l = LevelMeter()
+        self.level_meter_l.setMinimumSize(60, 12)
+        self.level_meter_l.setMaximumSize(300, 20)
+        
+        self.level_meter_r = LevelMeter()
+        self.level_meter_r.setMinimumSize(60, 12)
+        self.level_meter_r.setMaximumSize(300, 20)
+        
+        self.meters_layout.addWidget(self.level_meter_l)
+        self.meters_layout.addWidget(self.level_meter_r)
+        
+        main_layout.addLayout(self.meters_layout)
         
         self.setStyleSheet("""
             TrackCard {
@@ -164,11 +186,11 @@ class TrackCard(QFrame):
             }
             TrackCard[selected="true"] {
                 background-color: #000000;
-                border: 1px solid #ffffff;
+                border: 2px solid #00ff00; /* Vibrant green border for obvious selection */
             }
             TrackCard[selected="true"]:hover {
                 background-color: #121214;
-                border-color: #ffffff;
+                border-color: #33ff33;
             }
             
             QLabel#TrackNumberLabel {
@@ -319,7 +341,8 @@ class TrackCard(QFrame):
 
     def update_levels(self):
         """Updates the LED VU level meter with the current peak dB."""
-        self.level_meter.set_level(self.track.level_history)
+        self.level_meter_l.set_level(self.track.level_history)
+        self.level_meter_r.set_level(self.track.level_history)
 
 
 

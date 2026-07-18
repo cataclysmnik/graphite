@@ -70,6 +70,7 @@ void AudioEngine::timerCallback()
 AudioEngine::AudioEngine()
 {
     pluginFormatManager.addDefaultFormats();
+    audioFormatManager.registerBasicFormats();
 
     m_recordBuffers.resize(32);
     m_recordSamplesWritten.resize(32, 0);
@@ -351,7 +352,63 @@ void AudioEngine::setPlayheadPosition(double timeSecs)
 {
     EngineMessage msg;
     msg.type = EngineCommandType::SetPlayheadPosition;
-    msg.floatValue = (float)timeSecs;
+    msg.floatValue = static_cast<float>(timeSecs);
+    sendMessageFromUI(msg);
+}
+
+void AudioEngine::loadAudioFileSynchronous(int trackIndex, double startTimeSecs, const juce::String& filePath)
+{
+    juce::File audioFile(filePath);
+    if (!audioFile.existsAsFile()) return;
+    
+    std::unique_ptr<juce::AudioFormatReader> reader(audioFormatManager.createReaderFor(audioFile));
+    if (!reader) return;
+    
+    double targetSampleRate = currentSampleRate.load();
+    if (targetSampleRate <= 0.0) targetSampleRate = 44100.0;
+    
+    int numChannels = 2; // Always convert to stereo for the engine
+    int numSamples = (int)((double)reader->lengthInSamples * (targetSampleRate / reader->sampleRate));
+    
+    auto buffer = std::make_shared<juce::AudioBuffer<float>>(numChannels, numSamples);
+    buffer->clear();
+    
+    if (reader->sampleRate == targetSampleRate) {
+        // No resampling needed
+        reader->read(buffer.get(), 0, numSamples, 0, true, true);
+    } else {
+        // Resample
+        juce::AudioBuffer<float> tempBuffer(reader->numChannels, (int)reader->lengthInSamples);
+        reader->read(&tempBuffer, 0, (int)reader->lengthInSamples, 0, true, true);
+        
+        juce::LagrangeInterpolator resampler;
+        double speedRatio = reader->sampleRate / targetSampleRate;
+        
+        for (int ch = 0; ch < numChannels; ++ch) {
+            int sourceChannel = std::min(ch, (int)tempBuffer.getNumChannels() - 1);
+            const float* inData = tempBuffer.getReadPointer(sourceChannel);
+            float* outData = buffer->getWritePointer(ch);
+            resampler.reset();
+            resampler.process(speedRatio, inData, outData, numSamples);
+        }
+    }
+    
+    // Create the item
+    AudioItem* item = new AudioItem(); // Will be owned by the track vector, must handle pointer cleanup carefully!
+    // Wait, the LockFree queue takes raw pointer, but the track vector takes by value. So we allocate raw here, and the audio thread will take ownership or copy it.
+    // Let's allocate it, and the audio thread will dereference, copy to track, and delete the pointer.
+    
+    item->id = std::rand(); // Simple ID for now
+    item->startTimeSecs = startTimeSecs;
+    item->offsetSecs = 0.0;
+    item->durationSecs = (double)numSamples / targetSampleRate;
+    item->buffer = buffer;
+    item->isSelected = false;
+    
+    EngineMessage msg;
+    msg.type = EngineCommandType::AddAudioItem;
+    msg.trackIndex = trackIndex;
+    msg.ptrValue = item;
     sendMessageFromUI(msg);
 }
 
@@ -478,6 +535,14 @@ void AudioEngine::processMessages()
                         tracks[msg.trackIndex].isArmed = msg.boolValue;
                     }
                     break;
+                case EngineCommandType::AddTrack: {
+                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    Track t;
+                    t.id = tracks.size();
+                    t.name = msg.stringValue[0] != '\0' ? msg.stringValue : "New Track";
+                    tracks.push_back(std::move(t));
+                    break;
+                }
                 case EngineCommandType::SetTrackSelect:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         for (auto& t : tracks) t.isSelected = false;
@@ -536,6 +601,17 @@ void AudioEngine::processMessages()
                                 }
                             }
                         }
+                    }
+                    break;
+                }
+                case EngineCommandType::AddAudioItem: {
+                    if (msg.ptrValue) {
+                        AudioItem* item = static_cast<AudioItem*>(msg.ptrValue);
+                        if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                            std::lock_guard<std::mutex> lock(m_trackMutex);
+                            tracks[msg.trackIndex].items.push_back(*item);
+                        }
+                        delete item; // We copied it into the vector, so clean up the heap allocation
                     }
                     break;
                 }
@@ -727,6 +803,15 @@ float AudioEngine::getTrackPeakR(int trackIndex) const
     std::lock_guard<std::mutex> lock(m_trackMutex);
     if (trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakR;
+    }
+    return 0.0f;
+}
+
+float AudioEngine::getTrackPan(int trackIndex) const
+{
+    std::lock_guard<std::mutex> lock(m_trackMutex);
+    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+        return tracks[trackIndex].pan;
     }
     return 0.0f;
 }

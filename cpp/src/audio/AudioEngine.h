@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
 #include <vector>
 #include <atomic>
@@ -40,6 +41,7 @@ public:
     void moveAudioItem(int itemId, int targetTrackIndex, double newStartTimeSecs);
     void setAudioItemSelection(int itemId, bool isSelected);
     void clearAudioItemSelection();
+    void loadAudioFileSynchronous(int trackIndex, double startTimeSecs, const juce::String& filePath);
     
     bool isEnginePlaying() const { return isPlaying.load(); }
     bool isEngineRecording() const { return isRecording.load(); }
@@ -49,6 +51,7 @@ public:
     int getSelectedTrackIndex() const { return selectedTrackIndex.load(); }
     float getTrackPeakL(int trackIndex) const;
     float getTrackPeakR(int trackIndex) const;
+    float getTrackPan(int trackIndex) const;
     
     std::vector<Track> getTracksSnapshot() const;
     
@@ -101,9 +104,12 @@ private:
     std::vector<Track> tracks;
     mutable std::mutex m_trackMutex;
     
-    // JUCE specific for VST3 hostingagement
+    // JUCE specific for VST3 hosting
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::KnownPluginList knownPluginList;
+    
+    // Audio Formats
+    juce::AudioFormatManager audioFormatManager;
 
     // Load/Save plugin list
     void loadKnownPlugins();

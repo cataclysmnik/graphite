@@ -73,38 +73,43 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
     m_btnArm = new QPushButton(QChar(0x25CF), this); // Record circle
     m_btnArm->setCheckable(true);
     
+    m_panDial = new CustomKnob(this);
+    m_panDial->setRange(0, 100);
+    m_panDial->setValue(50);
+    m_panDial->setFixedSize(30, 30);
+    m_panDial->setToolTip("Pan");
+    
     headerLayout->addWidget(m_btnMute);
     headerLayout->addWidget(m_btnSolo);
     headerLayout->addWidget(m_btnArm);
+    headerLayout->addWidget(m_panDial);
     
     mainLayout->addLayout(headerLayout);
 
     // No volume slider here anymore
     
     // Meters
-    QHBoxLayout* meterLayout = new QHBoxLayout();
-    m_meterL = new QProgressBar(this);
-    m_meterL->setRange(0, 100);
-    m_meterL->setFixedHeight(4);
-    m_meterL->setTextVisible(false);
+    QVBoxLayout* meterLayout = new QVBoxLayout();
+    meterLayout->setSpacing(2);
+    m_meterL = new LevelMeter(Qt::Horizontal, this);
+    m_meterL->setFixedHeight(6);
     
-    m_meterR = new QProgressBar(this);
-    m_meterR->setRange(0, 100);
-    m_meterR->setFixedHeight(4);
-    m_meterR->setTextVisible(false);
+    m_meterR = new LevelMeter(Qt::Horizontal, this);
+    m_meterR->setFixedHeight(6);
     
     meterLayout->addWidget(m_meterL);
     meterLayout->addWidget(m_meterR);
     mainLayout->addLayout(meterLayout);
     
     // Connect signals
+    connect(m_panDial, &QDial::valueChanged, this, &TrackCard::onPanChanged);
     connect(m_btnMute, &QPushButton::toggled, this, &TrackCard::onMuteToggled);
     connect(m_btnSolo, &QPushButton::toggled, this, &TrackCard::onSoloToggled);
     connect(m_btnArm, &QPushButton::toggled, this, &TrackCard::onArmToggled);
     
     m_meterTimer = new QTimer(this);
     connect(m_meterTimer, &QTimer::timeout, this, &TrackCard::updateMeters);
-    m_meterTimer->start(50);
+    m_meterTimer->start(16);
 }
 
 void TrackCard::updateMeters()
@@ -113,11 +118,18 @@ void TrackCard::updateMeters()
         float pL = m_engine->getTrackPeakL(m_trackIndex);
         float pR = m_engine->getTrackPeakR(m_trackIndex);
         
-        m_meterL->setValue(static_cast<int>(pL * 100.0f));
-        m_meterR->setValue(static_cast<int>(pR * 100.0f));
+        m_meterL->setLevel(pL);
+        m_meterR->setLevel(pR);
+        
+        // Synchronize pan state from engine
+        float enginePan = m_engine->getTrackPan(m_trackIndex); // -1.0 to 1.0
+        int panVal = static_cast<int>((enginePan * 50.0f) + 50.0f);
+        m_panDial->blockSignals(true);
+        m_panDial->setValue(panVal);
+        m_panDial->blockSignals(false);
     } else {
-        m_meterL->setValue(0);
-        m_meterR->setValue(0);
+        m_meterL->setLevel(0.0f);
+        m_meterR->setLevel(0.0f);
     }
 }
 
@@ -130,7 +142,7 @@ void TrackCard::mousePressEvent(QMouseEvent* event)
 void TrackCard::setSelected(bool selected)
 {
     if (selected) {
-        setStyleSheet(styleSheet() + " QWidget#TrackCard { border: 1px solid #ff0033; background-color: #1a1a1c; }");
+        setStyleSheet(styleSheet() + " QWidget#TrackCard { border: 2px solid #00ff00; background-color: #1a1a1c; }");
     } else {
         setStyleSheet(styleSheet() + " QWidget#TrackCard { border: none; border-bottom: 1px solid #222225; background-color: #111111; }");
     }

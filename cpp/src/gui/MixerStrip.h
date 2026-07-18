@@ -6,6 +6,8 @@
 #include <QPushButton>
 #include <QProgressBar>
 #include <QTimer>
+#include "LevelMeter.h"
+#include "CustomKnob.h"
 
 namespace dsp {
     class AudioEngine;
@@ -45,13 +47,13 @@ private:
 
     QLabel* m_nameLabel;
     QSlider* m_volFader;
-    QSlider* m_panSlider;
+    CustomKnob* m_panSlider;
     
     QPushButton* m_btnMute;
     QPushButton* m_btnSolo;
     
-    QProgressBar* m_meterL;
-    QProgressBar* m_meterR;
+    LevelMeter* m_meterL;
+    LevelMeter* m_meterR;
     QTimer* m_meterTimer;
 };
 

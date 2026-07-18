@@ -8,6 +8,10 @@
 #include <QScrollBar>
 #include <QMenu>
 #include <QKeyEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 
 namespace gui {
 
@@ -121,6 +125,7 @@ TimelineLanesWidget::TimelineLanesWidget(dsp::AudioEngine* engine, QWidget* pare
 {
     setMinimumSize(5000, 1000); // Allow scrolling
     setFocusPolicy(Qt::StrongFocus); // Accept keyboard events for deletion
+    setAcceptDrops(true); // Accept drag and drop for external files
     
     // Timer to update playhead position at ~60fps
     connect(&m_playheadTimer, &QTimer::timeout, this, &TimelineLanesWidget::onPlayheadTimerTick);
@@ -233,38 +238,35 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
                     int midY = clipRect.y() + clipRect.height() / 2;
                     float halfHeight = clipRect.height() / 2.0f;
                     
-                    int prevX = -1;
-                    float maxAmplitudeInPixel = 0.0f;
-                    float minAmplitudeInPixel = 0.0f;
-                    
-                    for (int s = 0; s < numSamples; ++s) {
-                        float sample = channelData[s];
-                        int currentX = clipRect.x() + (int)((float)s / numSamples * itemW);
+                    for (int x = 0; x < itemW; ++x) {
+                        int startSample = (int)(((float)x / itemW) * numSamples);
+                        int endSample = (int)(((float)(x + 1) / itemW) * numSamples);
+                        endSample = std::min(endSample, numSamples);
                         
-                        if (currentX > clipRect.right()) break;
+                        if (startSample >= numSamples) break;
                         
-                        if (currentX != prevX) {
-                            if (prevX != -1) {
-                                int yTop = midY - (int)(maxAmplitudeInPixel * halfHeight);
-                                int yBottom = midY - (int)(minAmplitudeInPixel * halfHeight);
-                                if (yTop == yBottom) {
-                                    painter.drawPoint(prevX, yTop);
-                                } else {
-                                    painter.drawLine(prevX, yTop, prevX, yBottom);
-                                }
-                            }
-                            prevX = currentX;
-                            maxAmplitudeInPixel = sample;
-                            minAmplitudeInPixel = sample;
-                        } else {
-                            if (sample > maxAmplitudeInPixel) maxAmplitudeInPixel = sample;
-                            if (sample < minAmplitudeInPixel) minAmplitudeInPixel = sample;
+                        float minAmplitude = 0.0f;
+                        float maxAmplitude = 0.0f;
+                        
+                        // If we are extremely zoomed in, multiple pixels might map to the same sample
+                        if (endSample == startSample) {
+                            endSample = startSample + 1;
                         }
-                    }
-                    if (prevX != -1 && prevX <= clipRect.right()) {
-                        int yTop = midY - (int)(maxAmplitudeInPixel * halfHeight);
-                        int yBottom = midY - (int)(minAmplitudeInPixel * halfHeight);
-                        painter.drawLine(prevX, yTop, prevX, yBottom);
+
+                        for (int s = startSample; s < endSample; ++s) {
+                            float sample = channelData[s];
+                            if (sample > maxAmplitude) maxAmplitude = sample;
+                            if (sample < minAmplitude) minAmplitude = sample;
+                        }
+                        
+                        int yTop = midY - (int)(maxAmplitude * halfHeight);
+                        int yBottom = midY - (int)(minAmplitude * halfHeight);
+                        
+                        if (yTop == yBottom) {
+                            painter.drawPoint(clipRect.x() + x, yTop);
+                        } else {
+                            painter.drawLine(clipRect.x() + x, yTop, clipRect.x() + x, yBottom);
+                        }
                     }
                 }
                 
@@ -295,41 +297,33 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
                     
                     int midY = clipRect.y() + clipRect.height() / 2;
                     float halfHeight = clipRect.height() / 2.0f;
-                    int prevX = -1;
-                    float maxAmp = 0.0f;
-                    float minAmp = 0.0f;
                     
-                    // Start from the most recent samples that fit on screen to optimize
-                    int startSample = std::max(0, samplesWritten - (int)((w / m_pixelsPerSecond) * currentSr));
-                    
-                    for (int s = startSample; s < samplesWritten; ++s) {
-                        float sample = channelData[s];
-                        int currentX = clipRect.x() + (int)((float)s / samplesWritten * itemW);
+                    for (int x = 0; x < itemW; ++x) {
+                        int startSample = (int)(((float)x / itemW) * samplesWritten);
+                        int endSample = (int)(((float)(x + 1) / itemW) * samplesWritten);
+                        endSample = std::min(endSample, samplesWritten);
                         
-                        if (currentX > clipRect.right()) break;
+                        if (startSample >= samplesWritten) break;
                         
-                        if (currentX != prevX) {
-                            if (prevX != -1) {
-                                int yTop = midY - (int)(maxAmp * halfHeight);
-                                int yBottom = midY - (int)(minAmp * halfHeight);
-                                if (yTop == yBottom) {
-                                    painter.drawPoint(prevX, yTop);
-                                } else {
-                                    painter.drawLine(prevX, yTop, prevX, yBottom);
-                                }
-                            }
-                            prevX = currentX;
-                            maxAmp = sample;
-                            minAmp = sample;
-                        } else {
-                            if (sample > maxAmp) maxAmp = sample;
-                            if (sample < minAmp) minAmp = sample;
+                        float minAmplitude = 0.0f;
+                        float maxAmplitude = 0.0f;
+                        
+                        if (endSample == startSample) endSample = startSample + 1;
+
+                        for (int s = startSample; s < endSample; ++s) {
+                            float sample = channelData[s];
+                            if (sample > maxAmplitude) maxAmplitude = sample;
+                            if (sample < minAmplitude) minAmplitude = sample;
                         }
-                    }
-                    if (prevX != -1 && prevX <= clipRect.right()) {
-                        int yTop = midY - (int)(maxAmp * halfHeight);
-                        int yBottom = midY - (int)(minAmp * halfHeight);
-                        painter.drawLine(prevX, yTop, prevX, yBottom);
+                        
+                        int yTop = midY - (int)(maxAmplitude * halfHeight);
+                        int yBottom = midY - (int)(minAmplitude * halfHeight);
+                        
+                        if (yTop == yBottom) {
+                            painter.drawPoint(clipRect.x() + x, yTop);
+                        } else {
+                            painter.drawLine(clipRect.x() + x, yTop, clipRect.x() + x, yBottom);
+                        }
                     }
                     
                     // Draw dotted red border for live recording
@@ -353,7 +347,7 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
             yOffset += (trackHeight + trackMargin);
         }
         
-        // Draw ghost drag clip
+        // Draw ghost drag clip for internal drags
         if (m_draggingItemId != -1) {
             for (const auto& track : tracks) {
                 for (const auto& item : track.items) {
@@ -374,6 +368,21 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
                     }
                 }
             }
+        } else if (m_isExternalDrag) {
+            // Draw ghost clip for external drag
+            int ghostX = m_previewStartTime * m_pixelsPerSecond;
+            int itemW = 100; // Arbitrary width since we don't know file length yet
+            int ghostY = m_draggingTrackIndex * (trackHeight + trackMargin) + 10;
+            
+            QRect ghostRect(ghostX, ghostY, itemW, trackHeight - 20);
+            
+            // Transparent ghost effect
+            QColor ghostColor = QColor("#00ff00"); // Green for new files
+            ghostColor.setAlpha(60);
+            painter.fillRect(ghostRect, ghostColor);
+            painter.setPen(QPen(QColor("#00ff00"), 1, Qt::DashLine));
+            painter.drawRect(ghostRect);
+            painter.drawText(ghostRect, Qt::AlignCenter, "Drop Audio Here");
         }
     }
     
@@ -544,6 +553,68 @@ void TimelineLanesWidget::contextMenuEvent(QContextMenuEvent* event)
             update();
         }
     }
+}
+
+void TimelineLanesWidget::dragEnterEvent(QDragEnterEvent* event)
+{
+    if (event->mimeData()->hasUrls()) {
+        m_isExternalDrag = true;
+        event->acceptProposedAction();
+        update();
+    }
+}
+
+void TimelineLanesWidget::dragMoveEvent(QDragMoveEvent* event)
+{
+    if (event->mimeData()->hasUrls() && m_engine) {
+        // Calculate drop target track and time
+        int trackHeight = 100;
+        int trackMargin = 4;
+        int trackIndex = event->pos().y() / (trackHeight + trackMargin);
+        
+        size_t numTracks = m_engine->getTracksSnapshot().size();
+        trackIndex = std::clamp(trackIndex, 0, (int)numTracks - 1);
+        
+        double startTime = std::max(0.0, (double)event->pos().x() / m_pixelsPerSecond);
+        
+        m_draggingTrackIndex = trackIndex;
+        m_previewStartTime = startTime;
+        
+        event->acceptProposedAction();
+        update();
+    }
+}
+
+void TimelineLanesWidget::dragLeaveEvent(QDragLeaveEvent* event)
+{
+    m_isExternalDrag = false;
+    update();
+}
+
+void TimelineLanesWidget::dropEvent(QDropEvent* event)
+{
+    m_isExternalDrag = false;
+    if (!m_engine) {
+        update();
+        return;
+    }
+    
+    const QMimeData* mimeData = event->mimeData();
+    if (mimeData->hasUrls()) {
+        QList<QUrl> urlList = mimeData->urls();
+        for (const QUrl& url : urlList) {
+            if (url.isLocalFile()) {
+                QString filePath = url.toLocalFile();
+                
+                // Load it using the pre-calculated position
+                m_engine->loadAudioFileSynchronous(m_draggingTrackIndex, m_previewStartTime, filePath.toStdString());
+                
+                break;
+            }
+        }
+        event->acceptProposedAction();
+    }
+    update();
 }
 
 

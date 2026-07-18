@@ -3,9 +3,12 @@
 #include <QWidget>
 #include <QLabel>
 #include <QSlider>
+#include <QDial>
 #include <QPushButton>
 #include <QProgressBar>
 #include <QTimer>
+#include "LevelMeter.h"
+#include "CustomKnob.h"
 
 namespace dsp {
     class AudioEngine;
@@ -51,9 +54,10 @@ private:
     QPushButton* m_btnSolo;
     QPushButton* m_btnArm;
     
-    QProgressBar* m_meterL;
-    QProgressBar* m_meterR;
+    LevelMeter* m_meterL;
+    LevelMeter* m_meterR;
     QTimer* m_meterTimer;
+    CustomKnob* m_panDial;
 };
 
 } // namespace gui

@@ -57,6 +57,12 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
 
+    // Drag and drop support for external files
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dragLeaveEvent(QDragLeaveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+
 private:
     void setPlayheadFromMouse(QMouseEvent* event);
     HitTestResult hitTest(const QPoint& pos);
@@ -74,6 +80,7 @@ private:
     int m_draggingTrackIndex { -1 };
     double m_dragOffsetX { 0.0 };
     double m_previewStartTime { 0.0 };
+    bool m_isExternalDrag { false };
     
     // Cache the playhead position to only update when it moves
     double m_lastPlayheadTime { 0.0 };
