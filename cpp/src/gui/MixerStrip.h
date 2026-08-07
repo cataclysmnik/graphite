@@ -37,6 +37,7 @@ private slots:
 public:
     void setSelected(bool selected);
     void setTrackIndex(int newIndex) { m_trackIndex = newIndex; }
+    int getTrackIndex() const { return m_trackIndex; }
     
 private slots:
     void updateMeters();

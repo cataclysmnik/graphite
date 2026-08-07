@@ -8,7 +8,10 @@
 #include "EffectsRack.h"
 #include "SignalFlow.h"
 #include "AudioSettingsDialog.h"
+#include "LoadingPopup.h"
 #include "../audio/AudioEngine.h"
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <QCoreApplication>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QMenuBar>
@@ -23,6 +26,8 @@
 #include <QDropEvent>
 #include <QMetaObject>
 #include <QButtonGroup>
+#include <QFileDialog>
+#include <QMessageBox>
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QShortcut>
@@ -175,6 +180,7 @@ void MainWindow::setupUi()
     };
     
     TcpListWidget* tcpList = new TcpListWidget(this, m_tcpPanel);
+    tcpList->setObjectName("TcpListWidget");
     tcpList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     tcpLayout->addWidget(tcpList);
     
@@ -384,6 +390,25 @@ void MainWindow::setupMenus()
     setMenuBar(menuBar);
 
     QMenu* fileMenu = menuBar->addMenu("File");
+    
+    QAction* newAction = fileMenu->addAction("New Project");
+    newAction->setShortcut(QKeySequence::New);
+    connect(newAction, &QAction::triggered, this, &MainWindow::newProject);
+    
+    QAction* openAction = fileMenu->addAction("Open Project...");
+    openAction->setShortcut(QKeySequence::Open);
+    connect(openAction, &QAction::triggered, this, &MainWindow::openProject);
+    
+    QAction* saveAction = fileMenu->addAction("Save Project");
+    saveAction->setShortcut(QKeySequence::Save);
+    connect(saveAction, &QAction::triggered, this, &MainWindow::saveProject);
+    
+    QAction* saveAsAction = fileMenu->addAction("Save Project As...");
+    saveAsAction->setShortcut(QKeySequence::SaveAs);
+    connect(saveAsAction, &QAction::triggered, this, &MainWindow::saveProjectAs);
+    
+    fileMenu->addSeparator();
+    
     QAction* exitAction = fileMenu->addAction("Exit");
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
 
@@ -641,6 +666,127 @@ void MainWindow::zoomOut()
         QPoint center(m_timeline->viewport()->width() / 2, 0);
         m_timeline->zoom(1.0 / 1.2, center);
     }
+}
+
+void MainWindow::newProject()
+{
+    if (!m_engine) return;
+    m_engine->clearProject();
+    m_currentProjectPath.clear();
+    rebuildTrackUI();
+}
+
+void MainWindow::openProject()
+{
+    QString fileName = QFileDialog::getOpenFileName(this, "Open Project", "", "Graphite Projects (*.graphite)");
+    if (fileName.isEmpty()) return;
+    
+    if (!m_engine) return;
+    
+    juce::File file(fileName.toStdString());
+    if (!file.existsAsFile()) return;
+
+    juce::String xmlString = file.loadFileAsString();
+    std::unique_ptr<juce::XmlElement> xml = juce::XmlDocument::parse(xmlString);
+    if (xml == nullptr) {
+        QMessageBox::critical(this, "Error", "Failed to parse project file.");
+        return;
+    }
+
+    juce::ValueTree tree = juce::ValueTree::fromXml(*xml);
+    
+    // Stop audio device before loading - this is the ONLY correct approach.
+    // JUCE's VST3 createPluginInstance() needs the MessageManager for dispatching.
+    // With the audio callback removed, there is zero thread contention.
+    if (m_deviceManager)
+        m_deviceManager->removeAudioCallback(m_engine);
+
+    // Show the loading popup (purely visual, indeterminate spinner)
+    gui::LoadingPopup loadingPopup("LOADING PROJECT...", this);
+    loadingPopup.show();
+    QCoreApplication::processEvents();
+
+    // Safe to call synchronously on main thread — no audio thread is running
+    m_engine->deserializeProjectState(tree, nullptr);
+
+    // Restart audio
+    if (m_deviceManager)
+        m_deviceManager->addAudioCallback(m_engine);
+
+    loadingPopup.close();
+    m_currentProjectPath = fileName;
+    rebuildTrackUI();
+}
+
+void MainWindow::saveProject()
+{
+    if (m_currentProjectPath.isEmpty()) {
+        saveProjectAs();
+        return;
+    }
+    
+    if (!m_engine) return;
+    
+    juce::ValueTree tree = m_engine->serializeProjectState();
+    std::unique_ptr<juce::XmlElement> xml(tree.createXml());
+    if (xml != nullptr) {
+        juce::String xmlString = xml->createDocument(juce::String());
+        juce::File file(m_currentProjectPath.toStdString());
+        file.replaceWithText(xmlString);
+    }
+}
+
+void MainWindow::saveProjectAs()
+{
+    QString fileName = QFileDialog::getSaveFileName(this, "Save Project As", "", "Graphite Projects (*.graphite)");
+    if (fileName.isEmpty()) return;
+    
+    m_currentProjectPath = fileName;
+    saveProject();
+}
+
+void MainWindow::rebuildTrackUI()
+{
+    if (!m_engine) return;
+    
+    auto tracks = m_engine->getTracksSnapshot();
+    
+    // 1. Rebuild TCP
+    QListWidget* tcpList = findChild<QListWidget*>("TcpListWidget");
+    if (tcpList) {
+        m_trackCards.clear();
+        tcpList->clear();
+        
+        for (size_t i = 0; i < tracks.size(); ++i) {
+            QListWidgetItem* item = new QListWidgetItem(tcpList);
+            item->setSizeHint(QSize(0, 100)); // TrackCard height
+            
+            TrackCard* card = new TrackCard(tracks[i].id, QString::fromStdString(tracks[i].name), m_engine, tcpList);
+            tcpList->setItemWidget(item, card);
+            m_trackCards.push_back(card);
+            connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
+        }
+    }
+    
+    // 2. Rebuild Mixer
+    MixerPanel* mixerTab = findChild<MixerPanel*>();
+    if (mixerTab) {
+        mixerTab->rebuildStrips(tracks);
+        m_mixerStrips = mixerTab->getMixerStrips();
+        
+        for (auto* strip : m_mixerStrips) {
+            if (strip->getTrackIndex() != -1) {
+                connect(strip, &MixerStrip::clicked, this, &MainWindow::selectTrack);
+            }
+        }
+    }
+    
+    // 3. Update timeline visually
+    if (m_timeline) {
+        m_timeline->update();
+    }
+    
+    selectTrack(0);
 }
 
 } // namespace gui

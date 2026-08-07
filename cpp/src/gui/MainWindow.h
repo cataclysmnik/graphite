@@ -47,6 +47,14 @@ private slots:
     void toggleRecording();
     void zoomIn();
     void zoomOut();
+    
+    // Project management slots
+    void newProject();
+    void openProject();
+    void saveProject();
+    void saveProjectAs();
+    
+    void rebuildTrackUI();
 
 private:
     void setupUi();
@@ -77,6 +85,8 @@ private:
     
     bool m_isRecording = false;
     bool m_isPlaying = false;
+    
+    QString m_currentProjectPath;
     
     ArmMode m_armMode = ArmMode::Standard;
 };

@@ -153,7 +153,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
 
     // Try to lock the plugin mutex. If the UI thread is currently mutating the plugin chain,
     // we just output silence this block to avoid crashing or glitching.
-    std::unique_lock<std::mutex> pluginLock(m_pluginMutex, std::try_to_lock);
+    std::unique_lock<std::recursive_mutex> pluginLock(m_pluginMutex, std::try_to_lock);
     if (!pluginLock.owns_lock()) {
         return;
     }
@@ -169,7 +169,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
     // Check for any soloed tracks
     bool anySolo = false;
     
-    std::lock_guard<std::mutex> trackLock(m_trackMutex);
+    std::unique_lock<std::recursive_mutex> trackLock(m_trackMutex, std::try_to_lock);
+    if (!trackLock.owns_lock()) {
+        return; // Output silence if UI is mutating tracks
+    }
     
     for (const auto& track : tracks) {
         if (track.isSolo) {
@@ -484,7 +487,7 @@ void AudioEngine::processMessages()
                     } else if (!shouldRecord && wasRecording) {
                         // Stop recording
                         isRecording.store(false, std::memory_order_relaxed);
-                        std::lock_guard<std::mutex> lock(m_trackMutex);
+                        std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                         
                         for (auto& track : tracks) {
                             if (track.isArmed && track.id >= 0 && track.id < m_recordBuffers.size()) {
@@ -535,7 +538,7 @@ void AudioEngine::processMessages()
                     }
                     break;
                 case EngineCommandType::AddTrack: {
-                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                     Track t;
                     t.id = tracks.size();
                     t.name = msg.stringValue[0] != '\0' ? msg.stringValue : "New Track";
@@ -543,7 +546,7 @@ void AudioEngine::processMessages()
                     break;
                 }
                 case EngineCommandType::MoveTrack: {
-                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                     int from = msg.trackIndex;
                     int to = msg.pluginIndex1;
                     if (from >= 0 && from < tracks.size() && to >= 0 && to < tracks.size() && from != to) {
@@ -566,7 +569,7 @@ void AudioEngine::processMessages()
                     }
                     break;
                 case EngineCommandType::DeleteAudioItem: {
-                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                     for (auto& track : tracks) {
                         auto it = std::remove_if(track.items.begin(), track.items.end(),
                                                  [&msg](const AudioItem& item) { return item.id == msg.itemId; });
@@ -578,7 +581,7 @@ void AudioEngine::processMessages()
                     break;
                 }
                 case EngineCommandType::MoveAudioItem: {
-                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                     AudioItem movedItem;
                     bool found = false;
                     
@@ -600,7 +603,7 @@ void AudioEngine::processMessages()
                     break;
                 }
                 case EngineCommandType::SelectAudioItem: {
-                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                     if (msg.itemId == -1) {
                         for (auto& track : tracks) {
                             for (auto& item : track.items) {
@@ -623,7 +626,7 @@ void AudioEngine::processMessages()
                     if (msg.ptrValue) {
                         AudioItem* item = static_cast<AudioItem*>(msg.ptrValue);
                         if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
-                            std::lock_guard<std::mutex> lock(m_trackMutex);
+                            std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                             tracks[msg.trackIndex].items.push_back(*item);
                         }
                         delete item; // We copied it into the vector, so clean up the heap allocation
@@ -738,7 +741,7 @@ void AudioEngine::loadPluginSynchronous(int trackIndex, const juce::String& iden
     }
     
     if (newPlugin != nullptr) {
-        std::lock_guard<std::mutex> lock(m_pluginMutex);
+        std::lock_guard<std::recursive_mutex> lock(m_pluginMutex);
         tracks[trackIndex].plugins.push_back(std::move(newPlugin));
     }
 }
@@ -749,7 +752,7 @@ void AudioEngine::movePluginSynchronous(int trackIndex, int fromIndex, int toInd
     auto& plugins = tracks[trackIndex].plugins;
     if (fromIndex < 0 || fromIndex >= plugins.size() || toIndex < 0 || toIndex >= plugins.size() || fromIndex == toIndex) return;
 
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_pluginMutex);
     
     // Check bounds again under lock just in case
     if (fromIndex < 0 || fromIndex >= plugins.size() || toIndex < 0 || toIndex >= plugins.size()) return;
@@ -770,7 +773,7 @@ void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
         cachedPluginWindows.erase(proc);
     }
 
-    std::lock_guard<std::mutex> lock(m_pluginMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_pluginMutex);
     
     if (pluginIndex >= 0 && pluginIndex < plugins.size()) {
         plugins.erase(plugins.begin() + pluginIndex);
@@ -779,7 +782,7 @@ void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
 
 void AudioEngine::moveTrackSynchronous(int fromIndex, int toIndex)
 {
-    std::lock_guard<std::mutex> lock(m_trackMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
     if (fromIndex >= 0 && fromIndex < tracks.size() && 
         toIndex >= 0 && toIndex < tracks.size() && 
         fromIndex != toIndex) 
@@ -807,6 +810,7 @@ void AudioEngine::moveTrackSynchronous(int fromIndex, int toIndex)
 
 float AudioEngine::getTrackPeakL(int trackIndex) const
 {
+    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
     if (trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakL;
     }
@@ -815,7 +819,7 @@ float AudioEngine::getTrackPeakL(int trackIndex) const
 
 float AudioEngine::getTrackPeakR(int trackIndex) const
 {
-    std::lock_guard<std::mutex> lock(m_trackMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
     if (trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakR;
     }
@@ -824,7 +828,7 @@ float AudioEngine::getTrackPeakR(int trackIndex) const
 
 float AudioEngine::getTrackPan(int trackIndex) const
 {
-    std::lock_guard<std::mutex> lock(m_trackMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
     if (trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].pan;
     }
@@ -833,7 +837,7 @@ float AudioEngine::getTrackPan(int trackIndex) const
 
 std::vector<Track> AudioEngine::getTracksSnapshot() const
 {
-    std::lock_guard<std::mutex> lock(m_trackMutex);
+    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
     
     // We cannot copy std::unique_ptr<juce::AudioProcessor>, so we need to manually copy the tracks
     // ignoring the plugin chain (since Timeline doesn't need plugins)
@@ -880,6 +884,230 @@ double AudioEngine::getRecordStartTime(int trackId) const
         return m_recordStartTimes[trackId];
     }
     return 0.0;
+}
+
+void AudioEngine::clearProject()
+{
+    bool wasPlaying = isPlaying.load();
+    isPlaying.store(false);
+    
+    {
+        std::unique_lock<std::recursive_mutex> pluginLock(m_pluginMutex);
+        std::lock_guard<std::recursive_mutex> trackLock(m_trackMutex);
+        tracks.clear();
+        playheadTimeSeconds.store(0.0);
+    }
+}
+
+juce::ValueTree AudioEngine::serializeProjectState()
+{
+    std::unique_lock<std::recursive_mutex> pluginLock(m_pluginMutex);
+    std::lock_guard<std::recursive_mutex> trackLock(m_trackMutex);
+    
+    juce::ValueTree projectTree("GraphiteProject");
+    projectTree.setProperty("playheadTime", playheadTimeSeconds.load(), nullptr);
+    
+    juce::ValueTree tracksTree("Tracks");
+    for (const auto& track : tracks) {
+        juce::ValueTree trackTree("Track");
+        trackTree.setProperty("id", track.id, nullptr);
+        trackTree.setProperty("name", juce::String(track.name), nullptr);
+        trackTree.setProperty("volume", track.volume, nullptr);
+        trackTree.setProperty("pan", track.pan, nullptr);
+        trackTree.setProperty("isMuted", track.isMuted, nullptr);
+        trackTree.setProperty("isSolo", track.isSolo, nullptr);
+        trackTree.setProperty("isArmed", track.isArmed, nullptr);
+        trackTree.setProperty("inputChannel", track.inputChannel, nullptr);
+        
+        juce::ValueTree itemsTree("Items");
+        for (const auto& item : track.items) {
+            juce::ValueTree itemTree("Item");
+            itemTree.setProperty("id", item.id, nullptr);
+            itemTree.setProperty("filePath", juce::String(item.filePath), nullptr);
+            itemTree.setProperty("startTimeSecs", item.startTimeSecs, nullptr);
+            itemTree.setProperty("offsetSecs", item.offsetSecs, nullptr);
+            itemTree.setProperty("durationSecs", item.durationSecs, nullptr);
+            itemsTree.addChild(itemTree, -1, nullptr);
+        }
+        trackTree.addChild(itemsTree, -1, nullptr);
+        
+        juce::ValueTree pluginsTree("Plugins");
+        for (const auto& plugin : track.plugins) {
+            if (plugin != nullptr) {
+                if (auto* instance = dynamic_cast<juce::AudioPluginInstance*>(plugin.get())) {
+                    juce::ValueTree pluginTree("Plugin");
+                    auto desc = instance->getPluginDescription();
+                    pluginTree.setProperty("identifier", desc.fileOrIdentifier, nullptr);
+                    
+                    juce::MemoryBlock stateBlock;
+                    instance->getStateInformation(stateBlock);
+                    pluginTree.setProperty("state", stateBlock.toBase64Encoding(), nullptr);
+                    
+                    pluginsTree.addChild(pluginTree, -1, nullptr);
+                }
+            }
+        }
+        trackTree.addChild(pluginsTree, -1, nullptr);
+        tracksTree.addChild(trackTree, -1, nullptr);
+    }
+    
+    projectTree.addChild(tracksTree, -1, nullptr);
+    return projectTree;
+}
+
+void AudioEngine::deserializeProjectState(const juce::ValueTree& state, std::function<void(float)> progressCallback)
+{
+    if (!state.isValid() || !state.hasType("GraphiteProject")) return;
+    
+    clearProject();
+    
+    playheadTimeSeconds.store((double)state.getProperty("playheadTime"));
+    
+    juce::ValueTree tracksTree = state.getChildWithName("Tracks");
+    if (tracksTree.isValid()) {
+        std::vector<Track> newTracks;
+        
+        int numTracks = tracksTree.getNumChildren();
+        int totalPlugins = 0;
+        int pluginsLoaded = 0;
+        
+        // Count total plugins for progress bar
+        for (int i = 0; i < numTracks; ++i) {
+            juce::ValueTree trackTree = tracksTree.getChild(i);
+            juce::ValueTree pluginsTree = trackTree.getChildWithName("Plugins");
+            if (pluginsTree.isValid()) {
+                totalPlugins += pluginsTree.getNumChildren();
+            }
+        }
+        
+        for (int i = 0; i < numTracks; ++i) {
+            juce::ValueTree trackTree = tracksTree.getChild(i);
+            if (trackTree.hasType("Track")) {
+                Track t;
+                t.id = trackTree.getProperty("id", 0);
+                t.name = trackTree.getProperty("name", "Track").toString().toStdString();
+                t.volume = trackTree.getProperty("volume", 1.0f);
+                t.pan = trackTree.getProperty("pan", 0.0f);
+                t.isMuted = trackTree.getProperty("isMuted", false);
+                t.isSolo = trackTree.getProperty("isSolo", false);
+                t.isArmed = trackTree.getProperty("isArmed", false);
+                t.inputChannel = trackTree.getProperty("inputChannel", 0);
+                
+                // Audio Items
+                juce::ValueTree itemsTree = trackTree.getChildWithName("Items");
+                if (itemsTree.isValid()) {
+                    for (int j = 0; j < itemsTree.getNumChildren(); ++j) {
+                        juce::ValueTree itemTree = itemsTree.getChild(j);
+                        if (itemTree.hasType("Item")) {
+                            juce::String path = itemTree.getProperty("filePath", "");
+                            if (path.isNotEmpty()) {
+                                std::unique_ptr<juce::AudioFormatReader> reader(audioFormatManager.createReaderFor(juce::File(path)));
+                                if (reader) {
+                                    int numChannels = reader->numChannels;
+                                    double targetSampleRate = currentSampleRate.load();
+                                    if (targetSampleRate <= 0.0) targetSampleRate = 44100.0;
+                                    
+                                    int numSamples = (int)(reader->lengthInSamples * (targetSampleRate / reader->sampleRate));
+                                    auto buffer = std::make_shared<juce::AudioBuffer<float>>(numChannels, numSamples);
+                                    
+                                    if (std::abs(targetSampleRate - reader->sampleRate) < 1.0) {
+                                        reader->read(buffer.get(), 0, numSamples, 0, true, true);
+                                    } else {
+                                        juce::AudioBuffer<float> tempBuffer(reader->numChannels, (int)reader->lengthInSamples);
+                                        reader->read(&tempBuffer, 0, (int)reader->lengthInSamples, 0, true, true);
+                                        
+                                        juce::LagrangeInterpolator resampler;
+                                        double speedRatio = reader->sampleRate / targetSampleRate;
+                                        for (int ch = 0; ch < numChannels; ++ch) {
+                                            if (progressCallback) {
+                                                progressCallback(-1.0f); // special value to just pump events
+                                            }
+                                            int sourceChannel = std::min(ch, (int)tempBuffer.getNumChannels() - 1);
+                                            const float* inData = tempBuffer.getReadPointer(sourceChannel);
+                                            float* outData = buffer->getWritePointer(ch);
+                                            resampler.reset();
+                                            resampler.process(speedRatio, inData, outData, numSamples);
+                                        }
+                                    }
+                                    
+                                    AudioItem item;
+                                    item.id = itemTree.getProperty("id", std::rand());
+                                    item.filePath = path.toStdString();
+                                    item.startTimeSecs = itemTree.getProperty("startTimeSecs", 0.0);
+                                    item.offsetSecs = itemTree.getProperty("offsetSecs", 0.0);
+                                    item.durationSecs = itemTree.getProperty("durationSecs", (double)numSamples / targetSampleRate);
+                                    item.buffer = buffer;
+                                    item.isSelected = false;
+                                    
+                                    t.items.push_back(item);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Plugins
+                juce::ValueTree pluginsTree = trackTree.getChildWithName("Plugins");
+                if (pluginsTree.isValid()) {
+                    for (int j = 0; j < pluginsTree.getNumChildren(); ++j) {
+                        juce::ValueTree pluginTree = pluginsTree.getChild(j);
+                        if (pluginTree.hasType("Plugin")) {
+                            juce::String identifier = pluginTree.getProperty("identifier", "");
+                            juce::String state64 = pluginTree.getProperty("state", "");
+                            
+                            if (identifier.isNotEmpty()) {
+                                std::unique_ptr<juce::PluginDescription> pdesc;
+                                for (const auto& desc : knownPluginList.getTypes()) {
+                                    if (desc.fileOrIdentifier == identifier) {
+                                        pdesc = std::make_unique<juce::PluginDescription>(desc);
+                                        break;
+                                    }
+                                }
+                                if (pdesc == nullptr) {
+                                    pdesc = knownPluginList.getTypeForIdentifierString(identifier);
+                                }
+                                
+                                if (pdesc != nullptr) {
+                                    juce::String errorMessage;
+                                    
+                                    if (progressCallback && totalPlugins > 0) {
+                                        progressCallback((float)pluginsLoaded / totalPlugins);
+                                    }
+                                    
+                                    auto instance = pluginFormatManager.createPluginInstance(*pdesc, currentSampleRate.load(), 512, errorMessage);
+                                    if (instance) {
+                                        if (state64.isNotEmpty()) {
+                                            juce::MemoryBlock block;
+                                            block.fromBase64Encoding(state64);
+                                            instance->setStateInformation(block.getData(), (int)block.getSize());
+                                        }
+                                        t.plugins.push_back(std::move(instance));
+                                    }
+                                }
+                            }
+                            
+                            pluginsLoaded++;
+                            if (progressCallback && totalPlugins > 0) {
+                                progressCallback((float)pluginsLoaded / totalPlugins);
+                            }
+                        }
+                    }
+                }
+                
+                newTracks.push_back(std::move(t));
+                
+                // If there are no plugins to load, just use tracks as progress
+                if (progressCallback && totalPlugins == 0) {
+                    progressCallback((float)(i + 1) / numTracks);
+                }
+            }
+        }
+        
+        // Commit the fully loaded tracks to the engine under a quick lock
+        std::unique_lock<std::recursive_mutex> pluginLock(m_pluginMutex);
+        std::lock_guard<std::recursive_mutex> trackLock(m_trackMutex);
+        tracks = std::move(newTracks);
+    }
 }
 
 } // namespace dsp

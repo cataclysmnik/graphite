@@ -3,6 +3,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFrame>
+#include <QStyle>
 
 namespace gui {
 
@@ -16,6 +17,10 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
         QWidget#MixerStrip {
             background-color: #111111;
             border-right: 1px solid #222225;
+        }
+        QWidget#MixerStrip[selected="true"] {
+            background-color: #1a1a1c;
+            border-right: 1px solid #ff0033;
         }
         QPushButton {
             background-color: #222225;
@@ -185,11 +190,9 @@ void MixerStrip::mousePressEvent(QMouseEvent* event)
 
 void MixerStrip::setSelected(bool selected)
 {
-    if (selected) {
-        setStyleSheet(styleSheet() + " QWidget#MixerStrip { border-right: 1px solid #ff0033; background-color: #1a1a1c; }");
-    } else {
-        setStyleSheet(styleSheet() + " QWidget#MixerStrip { border-right: 1px solid #222225; background-color: #111111; }");
-    }
+    setProperty("selected", selected);
+    style()->unpolish(this);
+    style()->polish(this);
 }
 
 void MixerStrip::onMuteToggled(bool checked)

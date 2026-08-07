@@ -43,6 +43,11 @@ public:
     void clearAudioItemSelection();
     void loadAudioFileSynchronous(int trackIndex, double startTimeSecs, const juce::String& filePath);
     
+    // Project state serialization
+    juce::ValueTree serializeProjectState();
+    void deserializeProjectState(const juce::ValueTree& state, std::function<void(float)> progressCallback = nullptr);
+    void clearProject();
+    
     bool isEnginePlaying() const { return isPlaying.load(); }
     bool isEngineRecording() const { return isRecording.load(); }
     double getPlayheadTime() const { return playheadTimeSeconds.load(); }
@@ -98,11 +103,11 @@ private:
     std::vector<double> m_recordStartTimes;
     
     // Concurrency for plugins
-    std::mutex m_pluginMutex;
+    std::recursive_mutex m_pluginMutex;
     
     // Tracks
     std::vector<Track> tracks;
-    mutable std::mutex m_trackMutex;
+    mutable std::recursive_mutex m_trackMutex;
     
     // JUCE specific for VST3 hosting
     juce::AudioPluginFormatManager pluginFormatManager;

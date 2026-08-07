@@ -59,6 +59,7 @@ add_executable(GuitarDAW_CPP
     src/audio/NamEffect.cpp
     src/audio/NamAudioProcessor.cpp
     src/gui/AudioSettingsDialog.cpp
+    src/gui/LoadingPopup.cpp
     src/gui/StyleTheme.cpp
     src/gui/CustomTitleBar.cpp
     src/gui/MainWindow.cpp

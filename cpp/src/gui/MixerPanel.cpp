@@ -58,4 +58,31 @@ void MixerPanel::reorderStrips(int fromIndex, int toIndex)
     }
 }
 
+void MixerPanel::rebuildStrips(const std::vector<dsp::Track>& tracks)
+{
+    QHBoxLayout* layout = qobject_cast<QHBoxLayout*>(widget()->layout());
+    if (!layout) return;
+    
+    // Remove all strips except Master (index 0)
+    for (size_t i = 1; i < m_mixerStrips.size(); ++i) {
+        layout->removeWidget(m_mixerStrips[i]);
+        m_mixerStrips[i]->deleteLater();
+    }
+    
+    // Keep only the master strip in our vector
+    if (m_mixerStrips.size() > 0) {
+        auto master = m_mixerStrips[0];
+        m_mixerStrips.clear();
+        m_mixerStrips.push_back(master);
+    }
+    
+    // Add new strips based on tracks
+    for (size_t i = 0; i < tracks.size(); ++i) {
+        MixerStrip* strip = new MixerStrip((int)i, QString::fromStdString(tracks[i].name), m_engine, widget());
+        // Insert before the trailing stretch
+        layout->insertWidget(layout->count() - 1, strip);
+        m_mixerStrips.push_back(strip);
+    }
+}
+
 } // namespace gui

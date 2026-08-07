@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QScrollArea>
+#include "../audio/AudioModels.h"
 
 namespace dsp {
     class AudioEngine;
@@ -15,6 +16,7 @@ public:
     explicit MixerPanel(dsp::AudioEngine* engine, QWidget* parent = nullptr);
     const std::vector<class MixerStrip*>& getMixerStrips() const { return m_mixerStrips; }
     void reorderStrips(int fromIndex, int toIndex);
+    void rebuildStrips(const std::vector<dsp::Track>& tracks);
 
 private:
     dsp::AudioEngine* m_engine;
