@@ -148,6 +148,8 @@ AudioSettingsDialog::AudioSettingsDialog(juce::AudioDeviceManager& deviceManager
         m_requestSampleRateCheck->setChecked(true);
         m_requestBlockSizeCheck->setChecked(true);
     }
+    
+    m_isInitializing = false;
 }
 
 AudioSettingsDialog::~AudioSettingsDialog() {}
@@ -217,28 +219,69 @@ void AudioSettingsDialog::onDeviceChanged()
     m_outputLastCombo->clear();
 
     QString typeName = m_driverTypeCombo->currentText();
-    m_deviceManager.setCurrentAudioDeviceType(juce::String(typeName.toStdString()), true);
+    QString deviceName = m_outputDeviceCombo->currentText();
     
-    if (auto* device = m_deviceManager.getCurrentAudioDevice()) {
-        auto inNames = device->getInputChannelNames();
+    juce::AudioIODeviceType* type = nullptr;
+    for (auto* t : m_deviceManager.getAvailableDeviceTypes()) {
+        if (t->getTypeName().toStdString() == typeName.toStdString()) {
+            type = t;
+            break;
+        }
+    }
+    
+    juce::AudioIODevice* deviceToQuery = nullptr;
+    std::unique_ptr<juce::AudioIODevice> tempDevice;
+    
+    if (type) {
+        auto* currentDevice = m_deviceManager.getCurrentAudioDevice();
+        if (currentDevice && currentDevice->getTypeName() == type->getTypeName() && currentDevice->getName().toStdString() == deviceName.toStdString()) {
+            deviceToQuery = currentDevice;
+        } else {
+            tempDevice.reset(type->createDevice(juce::String(deviceName.toStdString()), juce::String(deviceName.toStdString())));
+            deviceToQuery = tempDevice.get();
+        }
+    }
+    
+    if (deviceToQuery) {
+        auto inNames = deviceToQuery->getInputChannelNames();
         for (int i = 0; i < inNames.size(); ++i) {
             QString label = QString::number(i + 1) + ": " + QString::fromStdString(inNames[i].toStdString());
             m_inputFirstCombo->addItem(label, i);
             m_inputLastCombo->addItem(label, i);
         }
         
-        auto outNames = device->getOutputChannelNames();
+        auto outNames = deviceToQuery->getOutputChannelNames();
         for (int i = 0; i < outNames.size(); ++i) {
             QString label = QString::number(i + 1) + ": " + QString::fromStdString(outNames[i].toStdString());
             m_outputFirstCombo->addItem(label, i);
             m_outputLastCombo->addItem(label, i);
         }
         
-        if (m_inputFirstCombo->count() > 0) m_inputFirstCombo->setCurrentIndex(0);
-        if (m_inputLastCombo->count() > 0) m_inputLastCombo->setCurrentIndex(m_inputLastCombo->count() - 1);
+        bool loadedFromSetup = false;
+        if (m_isInitializing && m_deviceManager.getCurrentAudioDevice() == deviceToQuery) {
+            auto setup = m_deviceManager.getAudioDeviceSetup();
+            if (!setup.useDefaultInputChannels) {
+                int firstIn = setup.inputChannels.findNextSetBit(0);
+                int lastIn = setup.inputChannels.getHighestBit();
+                if (firstIn >= 0 && firstIn < m_inputFirstCombo->count()) m_inputFirstCombo->setCurrentIndex(firstIn);
+                if (lastIn >= 0 && lastIn < m_inputLastCombo->count()) m_inputLastCombo->setCurrentIndex(lastIn);
+                loadedFromSetup = true;
+            }
+            if (!setup.useDefaultOutputChannels) {
+                int firstOut = setup.outputChannels.findNextSetBit(0);
+                int lastOut = setup.outputChannels.getHighestBit();
+                if (firstOut >= 0 && firstOut < m_outputFirstCombo->count()) m_outputFirstCombo->setCurrentIndex(firstOut);
+                if (lastOut >= 0 && lastOut < m_outputLastCombo->count()) m_outputLastCombo->setCurrentIndex(lastOut);
+                loadedFromSetup = true;
+            }
+        }
         
-        if (m_outputFirstCombo->count() > 0) m_outputFirstCombo->setCurrentIndex(0);
-        if (m_outputLastCombo->count() > 0) m_outputLastCombo->setCurrentIndex(m_outputLastCombo->count() - 1);
+        if (!loadedFromSetup) {
+            if (m_inputFirstCombo->count() > 0) m_inputFirstCombo->setCurrentIndex(0);
+            if (m_inputLastCombo->count() > 0) m_inputLastCombo->setCurrentIndex(m_inputLastCombo->count() - 1);
+            if (m_outputFirstCombo->count() > 0) m_outputFirstCombo->setCurrentIndex(0);
+            if (m_outputLastCombo->count() > 0) m_outputLastCombo->setCurrentIndex(m_outputLastCombo->count() - 1);
+        }
     }
 }
 

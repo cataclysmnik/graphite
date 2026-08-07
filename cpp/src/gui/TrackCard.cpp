@@ -72,6 +72,7 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
     m_btnSolo->setCheckable(true);
     m_btnArm = new QPushButton(QChar(0x25CF), this); // Record circle
     m_btnArm->setCheckable(true);
+    m_btnArm->setChecked(true);
     
     m_panDial = new CustomKnob(this);
     m_panDial->setRange(0, 100);
@@ -114,7 +115,7 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
 
 void TrackCard::updateMeters()
 {
-    if (m_engine && m_engine->isEnginePlaying()) {
+    if (m_engine) {
         float pL = m_engine->getTrackPeakL(m_trackIndex);
         float pR = m_engine->getTrackPeakR(m_trackIndex);
         

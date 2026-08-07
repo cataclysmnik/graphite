@@ -53,6 +53,8 @@ private:
     QPushButton* m_okBtn;
     QPushButton* m_cancelBtn;
     QPushButton* m_applyBtn;
+    
+    bool m_isInitializing = true;
 };
 
 } // namespace gui

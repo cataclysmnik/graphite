@@ -15,8 +15,6 @@ class TimeRulerWidget : public QWidget
     Q_OBJECT
 public:
     explicit TimeRulerWidget(dsp::AudioEngine* engine, QWidget* parent = nullptr);
-    
-    void setScrollOffset(int offset);
     void setZoom(double pixelsPerSecond);
 
 protected:
@@ -28,7 +26,6 @@ private:
     void setPlayheadFromMouse(QMouseEvent* event);
 private:
     dsp::AudioEngine* m_engine;
-    int m_scrollOffset { 0 };
     double m_pixelsPerSecond { 50.0 };
 };
 
@@ -98,7 +95,6 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private slots:
-    void onHorizontalScroll(int value);
     void onScrollRequested(int playheadX);
 
 private:

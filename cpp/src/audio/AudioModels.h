@@ -27,8 +27,9 @@ struct Track {
     float pan = 0.0f;    // -1.0 (Left) to 1.0 (Right)
     bool isMuted = false;
     bool isSolo = false;
-    bool isArmed = false;
+    bool isArmed = true;
     bool isSelected = false;
+    int inputChannel = 0;
     
     // Metering (written by audio thread, read by UI)
     float peakL = 0.0f;

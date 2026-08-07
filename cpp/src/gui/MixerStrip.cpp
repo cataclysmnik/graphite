@@ -158,7 +158,7 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
 
 void MixerStrip::updateMeters()
 {
-    if (m_engine && m_engine->isEnginePlaying() && m_trackIndex != -1) {
+    if (m_engine && m_trackIndex != -1) {
         float pL = m_engine->getTrackPeakL(m_trackIndex);
         float pR = m_engine->getTrackPeakR(m_trackIndex);
         

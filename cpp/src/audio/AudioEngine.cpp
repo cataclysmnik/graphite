@@ -159,7 +159,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
     }
 
     constexpr int MAX_BUFFER = 4096;
-    float monoInput[MAX_BUFFER] = {0.0f};
     
     int samplesToProcess = juce::jmin(numSamples, MAX_BUFFER);
     
@@ -167,15 +166,6 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
     double currentSr = currentSampleRate.load();
     bool engineIsPlaying = isPlaying.load();
 
-    // Capture mono hardware input (e.g. guitar)
-    if (numInputChannels > 0 && samplesToProcess > 0) {
-        for (int ch = 0; ch < numInputChannels; ++ch) {
-            if (inputChannelData[ch] != nullptr) {
-                juce::FloatVectorOperations::add(monoInput, inputChannelData[ch], samplesToProcess);
-            }
-        }
-        juce::FloatVectorOperations::multiply(monoInput, 1.0f / (float)numInputChannels, samplesToProcess);
-    }
     // Check for any soloed tracks
     bool anySolo = false;
     
@@ -203,20 +193,29 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         
         // If track is armed, feed it the live input
         if (track.isArmed && samplesToProcess > 0) {
-            juce::FloatVectorOperations::copy(trackLeft, monoInput, samplesToProcess);
-            juce::FloatVectorOperations::copy(trackRight, monoInput, samplesToProcess);
+            const float* sourceInput = nullptr;
+            if (track.inputChannel >= 0 && track.inputChannel < numInputChannels && inputChannelData[track.inputChannel] != nullptr) {
+                sourceInput = inputChannelData[track.inputChannel];
+            } else if (numInputChannels > 0 && inputChannelData[0] != nullptr) {
+                sourceInput = inputChannelData[0]; // fallback to channel 0
+            }
             
-            // If recording, write to the track's record buffer
-            if (isRecording.load()) {
-                if (track.id >= 0 && track.id < m_recordBuffers.size() && m_recordBuffers[track.id] != nullptr) {
-                    int writePos = m_recordSamplesWritten[track.id];
-                    int available = m_recordBuffers[track.id]->getNumSamples() - writePos;
-                    int toWrite = std::min(samplesToProcess, available);
-                    
-                    if (toWrite > 0) {
-                        m_recordBuffers[track.id]->copyFrom(0, writePos, monoInput, toWrite);
-                        m_recordBuffers[track.id]->copyFrom(1, writePos, monoInput, toWrite);
-                        m_recordSamplesWritten[track.id] += toWrite;
+            if (sourceInput != nullptr) {
+                juce::FloatVectorOperations::copy(trackLeft, sourceInput, samplesToProcess);
+                juce::FloatVectorOperations::copy(trackRight, sourceInput, samplesToProcess);
+                
+                // If recording, write to the track's record buffer
+                if (isRecording.load()) {
+                    if (track.id >= 0 && track.id < m_recordBuffers.size() && m_recordBuffers[track.id] != nullptr) {
+                        int writePos = m_recordSamplesWritten[track.id];
+                        int available = m_recordBuffers[track.id]->getNumSamples() - writePos;
+                        int toWrite = std::min(samplesToProcess, available);
+                        
+                        if (toWrite > 0) {
+                            m_recordBuffers[track.id]->copyFrom(0, writePos, sourceInput, toWrite);
+                            m_recordBuffers[track.id]->copyFrom(1, writePos, sourceInput, toWrite);
+                            m_recordSamplesWritten[track.id] += toWrite;
+                        }
                     }
                 }
             }
@@ -541,6 +540,22 @@ void AudioEngine::processMessages()
                     t.id = tracks.size();
                     t.name = msg.stringValue[0] != '\0' ? msg.stringValue : "New Track";
                     tracks.push_back(std::move(t));
+                    break;
+                }
+                case EngineCommandType::MoveTrack: {
+                    std::lock_guard<std::mutex> lock(m_trackMutex);
+                    int from = msg.trackIndex;
+                    int to = msg.pluginIndex1;
+                    if (from >= 0 && from < tracks.size() && to >= 0 && to < tracks.size() && from != to) {
+                        Track t = std::move(tracks[from]);
+                        tracks.erase(tracks.begin() + from);
+                        tracks.insert(tracks.begin() + to, std::move(t));
+                        
+                        // Keep track IDs consistent with indices
+                        for (size_t i = 0; i < tracks.size(); ++i) {
+                            tracks[i].id = (int)i;
+                        }
+                    }
                     break;
                 }
                 case EngineCommandType::SetTrackSelect:

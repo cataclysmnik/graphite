@@ -126,19 +126,19 @@ void MainWindow::setupUi()
     QPushButton* btnStandard = new QPushButton("STANDARD");
     btnStandard->setCheckable(true);
     btnStandard->setChecked(true);
-    btnStandard->setFixedHeight(20);
+    btnStandard->setFixedHeight(24);
     btnStandard->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnStandard, (int)ArmMode::Standard);
     
     QPushButton* btnUnion = new QPushButton("UNION");
     btnUnion->setCheckable(true);
-    btnUnion->setFixedHeight(20);
+    btnUnion->setFixedHeight(24);
     btnUnion->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnUnion, (int)ArmMode::Union);
     
     QPushButton* btnExclusive = new QPushButton("EXCLUSIVE");
     btnExclusive->setCheckable(true);
-    btnExclusive->setFixedHeight(20);
+    btnExclusive->setFixedHeight(24);
     btnExclusive->setFocusPolicy(Qt::NoFocus);
     m_armModeGroup->addButton(btnExclusive, (int)ArmMode::Exclusive);
     
@@ -175,6 +175,7 @@ void MainWindow::setupUi()
     };
     
     TcpListWidget* tcpList = new TcpListWidget(this, m_tcpPanel);
+    tcpList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
     tcpLayout->addWidget(tcpList);
     
     // Add default tracks
@@ -501,8 +502,16 @@ void MainWindow::selectTrack(int index)
 void MainWindow::openAudioSettings()
 {
     if (m_deviceManager) {
+        if (m_engine) {
+            m_deviceManager->removeAudioCallback(m_engine);
+        }
+        
         gui::AudioSettingsDialog dialog(*m_deviceManager, this);
         dialog.exec();
+        
+        if (m_engine) {
+            m_deviceManager->addAudioCallback(m_engine);
+        }
     }
 }
 
@@ -578,7 +587,7 @@ void MainWindow::togglePlayback()
         m_engine->setPlaying(m_isPlaying);
         
         if (!m_isPlaying) {
-            m_btnPlayPause->setIcon(QIcon(":/icons/pause.svg"));
+            m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
             // Also stop recording if we stop playback
             if (m_isRecording) {
                 m_isRecording = false;
@@ -586,7 +595,7 @@ void MainWindow::togglePlayback()
                 m_btnRecord->setStyleSheet("color: #ff3333; background-color: transparent; font-size: 14px;");
             }
         } else {
-            m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+            m_btnPlayPause->setIcon(QIcon(":/icons/pause.svg"));
         }
     }
 }

@@ -23,13 +23,7 @@ TimeRulerWidget::TimeRulerWidget(dsp::AudioEngine* engine, QWidget* parent)
     : QWidget(parent), m_engine(engine)
 {
     setFixedHeight(30);
-    setMinimumWidth(5000); // Allow scrolling
-}
-
-void TimeRulerWidget::setScrollOffset(int offset)
-{
-    m_scrollOffset = offset;
-    update();
+    setMinimumWidth(3600 * 50); // Default to 1 hour at 50px/sec
 }
 
 void TimeRulerWidget::setZoom(double pixelsPerSecond)
@@ -53,12 +47,13 @@ void TimeRulerWidget::paintEvent(QPaintEvent* event)
     painter.setPen(QPen(QColor("#222225"), 1));
     painter.drawLine(0, h - 1, w, h - 1);
     
-    // Translate painter horizontally for scrolling
-    painter.translate(-m_scrollOffset, 0);
+    // Draw Ticks (Optimized to exposed rect)
+    QRect exposed = event->rect();
+    int startX = exposed.left();
+    int endX = exposed.right();
     
-    // Draw Ticks
-    int visibleWidth = w + m_scrollOffset;
-    int maxSeconds = (visibleWidth / m_pixelsPerSecond) + 5;
+    double startS = std::max(0.0, (double)startX / m_pixelsPerSecond);
+    double endS = (double)endX / m_pixelsPerSecond;
     
     int tickStep = 5; // Draw a label every 5 seconds
     double subStep = 1.0; // Draw a small tick every 1 second
@@ -66,9 +61,9 @@ void TimeRulerWidget::paintEvent(QPaintEvent* event)
     QFont font("Consolas", 8);
     painter.setFont(font);
     
-    for (double s = 0.0; s <= maxSeconds; s += subStep) {
+    for (double s = startS; s <= endS + 1.0; s += subStep) {
         int x = s * m_pixelsPerSecond;
-        if (x < m_scrollOffset - 50) continue; // Skip off-screen to the left
+        if (x < startX - 50) continue; // Skip off-screen to the left
         
         bool isMajor = (std::fmod(s, tickStep) == 0.0);
         
@@ -94,8 +89,8 @@ void TimeRulerWidget::setPlayheadFromMouse(QMouseEvent* event)
 {
     if (!m_engine) return;
     
-    // Calculate time from x position taking scroll into account
-    int absoluteX = event->x() + m_scrollOffset;
+    // Calculate time from x position directly (event->x() is already in local scrolled coordinates)
+    int absoluteX = event->position().x();
     double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
     
     m_engine->setPlayheadPosition(timeSecs);
@@ -123,7 +118,7 @@ void TimeRulerWidget::mouseMoveEvent(QMouseEvent* event)
 TimelineLanesWidget::TimelineLanesWidget(dsp::AudioEngine* engine, QWidget* parent)
     : QWidget(parent), m_engine(engine)
 {
-    setMinimumSize(5000, 1000); // Allow scrolling
+    setMinimumSize(3600 * 50, 1000); // 1 hour at 50px/sec default
     setFocusPolicy(Qt::StrongFocus); // Accept keyboard events for deletion
     setAcceptDrops(true); // Accept drag and drop for external files
     
@@ -168,11 +163,16 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
     // Background (Stark Black)
     painter.fillRect(event->rect(), QColor("#050505"));
     
-    // Draw Grid Lines (Dotted)
+    // Draw Grid Lines (Dotted) optimized to exposed rect
+    QRect exposed = event->rect();
+    int startX = exposed.left();
+    int endX = exposed.right();
+    int startS = std::max(0, (int)(startX / m_pixelsPerSecond));
+    int endS = (int)(endX / m_pixelsPerSecond) + 1;
+    
     QPen gridPen(QColor("#222222"), 1, Qt::DotLine);
     painter.setPen(gridPen);
-    int maxSeconds = w / m_pixelsPerSecond;
-    for (int s = 0; s <= maxSeconds; s++) {
+    for (int s = startS; s <= endS; s++) {
         int x = s * m_pixelsPerSecond;
         painter.drawLine(x, 0, x, h);
     }
@@ -641,18 +641,10 @@ TimelineContainer::TimelineContainer(dsp::AudioEngine* engine, QWidget* parent)
     
     setWidget(container);
     
-    // Sync the horizontal scrollbar with the Ruler widget so it renders the ticks correctly
-    connect(horizontalScrollBar(), &QScrollBar::valueChanged, this, &TimelineContainer::onHorizontalScroll);
-    
     connect(m_lanes, &TimelineLanesWidget::requestScroll, this, &TimelineContainer::onScrollRequested);
 }
 
-void TimelineContainer::onHorizontalScroll(int value)
-{
-    if (m_ruler) {
-        m_ruler->setScrollOffset(value);
-    }
-}
+
 
 void TimelineContainer::onScrollRequested(int playheadX)
 {
