@@ -8,14 +8,20 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <QPoint>
+#include <QMouseEvent>
 
 namespace gui {
 
 class AudioSettingsDialog : public QDialog {
+    Q_OBJECT
 public:
     explicit AudioSettingsDialog(juce::AudioDeviceManager& deviceManager, QWidget* parent = nullptr);
     ~AudioSettingsDialog() override;
 
+protected:
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
 private:
     void populateDriverTypes();
     void onDriverTypeChanged(int index);
@@ -55,6 +61,7 @@ private:
     QPushButton* m_applyBtn;
     
     bool m_isInitializing = true;
+    QPoint m_dragPos;
 };
 
 } // namespace gui

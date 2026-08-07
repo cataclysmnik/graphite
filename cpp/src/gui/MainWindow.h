@@ -7,6 +7,7 @@
 #include <vector>
 #include <QPushButton>
 #include <QButtonGroup>
+#include <QCloseEvent>
 
 namespace dsp {
     class AudioEngine;
@@ -37,6 +38,7 @@ protected:
 #ifdef _WIN32
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void selectTrack(int index);
@@ -55,8 +57,13 @@ private slots:
     void saveProjectAs();
     
     void rebuildTrackUI();
+    void markDirty();       // Call whenever the project is modified
 
 private:
+    // Returns true if it is safe to proceed (user saved or discarded).
+    // Shows a "Save changes?" dialog if m_isDirty is true.
+    bool confirmSaveIfDirty();
+    void updateTitleBar();  // Refreshes title bar with project name + dirty indicator
     void setupUi();
     void setupMenus();
     void enforceDarkImmersiveMode();
@@ -87,6 +94,7 @@ private:
     bool m_isPlaying = false;
     
     QString m_currentProjectPath;
+    bool m_isDirty = false;
     
     ArmMode m_armMode = ArmMode::Standard;
 };

@@ -9,14 +9,45 @@ namespace gui {
 AudioSettingsDialog::AudioSettingsDialog(juce::AudioDeviceManager& deviceManager, QWidget* parent)
     : QDialog(parent), m_deviceManager(deviceManager)
 {
-    setWindowTitle("REAPER Preferences");
+    setWindowTitle("Graphite — Audio Settings");
     resize(600, 500);
+    setObjectName("AudioSettingsDialog");
+    setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QVBoxLayout* outerLayout = new QVBoxLayout(this);
+    outerLayout->setContentsMargins(0, 0, 0, 0);
+    outerLayout->setSpacing(0);
 
-    // Audio device settings label
-    QLabel* headerLabel = new QLabel("Audio device settings", this);
-    mainLayout->addWidget(headerLabel);
+    // ── Custom title bar strip ────────────────────────────────────────────────
+    QWidget* titleStrip = new QWidget(this);
+    titleStrip->setObjectName("DialogTitleStrip");
+    titleStrip->setFixedHeight(32);
+    QHBoxLayout* titleLayout = new QHBoxLayout(titleStrip);
+    titleLayout->setContentsMargins(12, 0, 0, 0);
+    titleLayout->setSpacing(0);
+
+    QLabel* titleLabel = new QLabel("GRAPHITE  ·  AUDIO SETTINGS", titleStrip);
+    titleLabel->setObjectName("DialogTitleLabel");
+    titleLayout->addWidget(titleLabel);
+    titleLayout->addStretch();
+
+    QPushButton* closeBtn = new QPushButton("✕", titleStrip);
+    closeBtn->setObjectName("DialogCloseBtn");
+    closeBtn->setFixedSize(32, 32);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setFocusPolicy(Qt::NoFocus);
+    connect(closeBtn, &QPushButton::clicked, this, &QDialog::reject);
+    titleLayout->addWidget(closeBtn);
+
+    outerLayout->addWidget(titleStrip);
+
+    // ── Content area ──────────────────────────────────────────────────────────
+    QWidget* content = new QWidget(this);
+    outerLayout->addWidget(content, 1);
+
+    QVBoxLayout* mainLayout = new QVBoxLayout(content);
+    mainLayout->setContentsMargins(12, 10, 12, 12);
+    mainLayout->setSpacing(6);
 
     // Audio System
     QHBoxLayout* systemLayout = new QHBoxLayout();
@@ -25,13 +56,13 @@ AudioSettingsDialog::AudioSettingsDialog(juce::AudioDeviceManager& deviceManager
     systemLayout->addWidget(m_driverTypeCombo, 1);
     mainLayout->addLayout(systemLayout);
 
-    // Group box for the main options (to match the gray box in reaper)
+    // Group box for the main device options
     QGroupBox* groupBox = new QGroupBox(this);
     QVBoxLayout* groupLayout = new QVBoxLayout(groupBox);
 
-    // ASIO Driver
+    // Device
     QHBoxLayout* driverLayout = new QHBoxLayout();
-    driverLayout->addWidget(new QLabel("ASIO Driver:", this));
+    driverLayout->addWidget(new QLabel("Device:", this));
     m_outputDeviceCombo = new QComboBox(this);
     driverLayout->addWidget(m_outputDeviceCombo, 1);
     groupLayout->addLayout(driverLayout);
@@ -150,6 +181,106 @@ AudioSettingsDialog::AudioSettingsDialog(juce::AudioDeviceManager& deviceManager
     }
     
     m_isInitializing = false;
+
+    setStyleSheet(R"(
+        QDialog#AudioSettingsDialog {
+            background-color: #0b0b0c;
+            color: #cccccc;
+            border: 1px solid #2a2a2d;
+        }
+        QWidget#DialogTitleStrip {
+            background-color: #000000;
+            border-bottom: 1px solid #1a1a1c;
+        }
+        QLabel#DialogTitleLabel {
+            color: #ffffff;
+            background: transparent;
+            font-family: "Consolas", monospace;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 1.5px;
+        }
+        QPushButton#DialogCloseBtn {
+            background: transparent;
+            border: none;
+            color: #66666a;
+            font-size: 11px;
+        }
+        QPushButton#DialogCloseBtn:hover {
+            background-color: #ff0033;
+            color: #ffffff;
+        }
+        QWidget {
+            background-color: #0b0b0c;
+            color: #cccccc;
+            font-family: "Consolas", monospace;
+            font-size: 10px;
+        }
+        QGroupBox {
+            border: 1px solid #2a2a2d;
+            margin-top: 8px;
+            padding-top: 8px;
+            color: #88888c;
+        }
+        QLabel {
+            color: #88888c;
+        }
+        QComboBox {
+            background-color: #111114;
+            color: #cccccc;
+            border: 1px solid #2a2a2d;
+            padding: 3px 6px;
+            min-height: 22px;
+        }
+        QComboBox::drop-down {
+            border: none;
+            width: 20px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #111114;
+            color: #cccccc;
+            selection-background-color: #1f1f22;
+            border: 1px solid #2a2a2d;
+        }
+        QLineEdit {
+            background-color: #111114;
+            color: #cccccc;
+            border: 1px solid #2a2a2d;
+            padding: 3px 6px;
+        }
+        QCheckBox {
+            color: #88888c;
+            spacing: 6px;
+        }
+        QCheckBox::indicator {
+            width: 13px;
+            height: 13px;
+            border: 1px solid #444446;
+            background-color: #111114;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #ff0033;
+            border-color: #ff0033;
+        }
+        QPushButton {
+            background-color: #111114;
+            color: #cccccc;
+            border: 1px solid #2a2a2d;
+            padding: 5px 14px;
+            font-family: "Consolas", monospace;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #1f1f22;
+            border-color: #ff0033;
+            color: #ffffff;
+        }
+        QPushButton:pressed {
+            background-color: #ff0033;
+            color: #ffffff;
+        }
+    )");
 }
 
 AudioSettingsDialog::~AudioSettingsDialog() {}
@@ -349,6 +480,22 @@ void AudioSettingsDialog::onApplyClicked()
         setResult(QDialog::Rejected);
     } else {
         setResult(QDialog::Accepted);
+    }
+}
+
+void AudioSettingsDialog::mousePressEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_dragPos = event->globalPosition().toPoint() - frameGeometry().topLeft();
+        event->accept();
+    }
+}
+
+void AudioSettingsDialog::mouseMoveEvent(QMouseEvent* event)
+{
+    if (event->buttons() & Qt::LeftButton) {
+        move(event->globalPosition().toPoint() - m_dragPos);
+        event->accept();
     }
 }
 

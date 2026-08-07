@@ -27,6 +27,7 @@
 #include <QMetaObject>
 #include <QButtonGroup>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QKeyEvent>
@@ -82,28 +83,10 @@ void MainWindow::setupUi()
     mainLayout->setSpacing(0);
 
     // Custom Title Bar
-    m_titleBar = new CustomTitleBar(this, "GRAPHITE", true, true);
+    m_titleBar = new CustomTitleBar(this, true, true);
     mainLayout->addWidget(m_titleBar);
 
-    // Toolbar
-    QWidget* toolbar = new QWidget(centralWidget);
-    toolbar->setObjectName("MainToolbar");
-    toolbar->setFixedHeight(40);
-    toolbar->setStyleSheet("QWidget#MainToolbar { background-color: #0b0b0c; border-bottom: 1px solid #222225; }");
-    
-    QHBoxLayout* toolbarLayout = new QHBoxLayout(toolbar);
-    toolbarLayout->setContentsMargins(10, 4, 10, 4);
-    toolbarLayout->setSpacing(8);
-
-    // Transport controls moved from here to above TCP
-    
-    toolbarLayout->addStretch();
-    
-    QPushButton* btnSettings = new QPushButton("Audio Settings...", toolbar);
-    connect(btnSettings, &QPushButton::clicked, this, &MainWindow::openAudioSettings);
-    toolbarLayout->addWidget(btnSettings);
-    
-    mainLayout->addWidget(toolbar);
+    // (Toolbar removed - Audio Settings moved to Settings menu in title bar)
 
     // Main layout scaffolding
     m_mainSplitter = new QSplitter(Qt::Vertical, centralWidget);
@@ -386,33 +369,36 @@ void MainWindow::setupUi()
 
 void MainWindow::setupMenus()
 {
-    QMenuBar* menuBar = new QMenuBar(this);
-    setMenuBar(menuBar);
+    // Menus live inside the custom title bar (not a separate QMenuBar)
+    QMenuBar* menuBar = m_titleBar->menuBar();
 
-    QMenu* fileMenu = menuBar->addMenu("File");
-    
+    // ── File ──────────────────────────────────────────────────────────────────
+    QMenu* fileMenu = menuBar->addMenu("FILE");
+
     QAction* newAction = fileMenu->addAction("New Project");
     newAction->setShortcut(QKeySequence::New);
     connect(newAction, &QAction::triggered, this, &MainWindow::newProject);
-    
+
     QAction* openAction = fileMenu->addAction("Open Project...");
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::openProject);
-    
+
     QAction* saveAction = fileMenu->addAction("Save Project");
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::saveProject);
-    
+
     QAction* saveAsAction = fileMenu->addAction("Save Project As...");
     saveAsAction->setShortcut(QKeySequence::SaveAs);
     connect(saveAsAction, &QAction::triggered, this, &MainWindow::saveProjectAs);
-    
+
     fileMenu->addSeparator();
-    
+
     QAction* exitAction = fileMenu->addAction("Exit");
     connect(exitAction, &QAction::triggered, this, &QMainWindow::close);
 
-    QMenu* audioMenu = menuBar->addMenu("Audio");
+    // ── Audio ─────────────────────────────────────────────────────────────────
+    QMenu* audioMenu = menuBar->addMenu("AUDIO");
+
     QAction* playAction = audioMenu->addAction("Toggle Play / Stop");
     connect(playAction, &QAction::triggered, [this]() {
         if (m_engine) {
@@ -420,6 +406,12 @@ void MainWindow::setupMenus()
             m_engine->setPlaying(!isPlaying);
         }
     });
+
+    // ── Settings ──────────────────────────────────────────────────────────────
+    QMenu* settingsMenu = menuBar->addMenu("SETTINGS");
+
+    QAction* audioSettingsAction = settingsMenu->addAction("Audio Settings...");
+    connect(audioSettingsAction, &QAction::triggered, this, &MainWindow::openAudioSettings);
 }
 
 void MainWindow::enforceDarkImmersiveMode()
@@ -447,32 +439,54 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
     }
 
     if (msg->message == WM_NCHITTEST) {
-        LRESULT hitTest = DefWindowProc(msg->hwnd, msg->message, msg->wParam, msg->lParam);
-        
-        // If cursor is over standard resize borders (handled by DWM), return native hit tests
-        if (hitTest == HTLEFT || hitTest == HTRIGHT || hitTest == HTTOP || hitTest == HTBOTTOM ||
-            hitTest == HTTOPLEFT || hitTest == HTTOPRIGHT || hitTest == HTBOTTOMLEFT || hitTest == HTBOTTOMRIGHT) 
-        {
-            *result = hitTest;
-            return true;
-        }
-        
-        // Otherwise, check if cursor is over our CustomTitleBar
+        // Because WM_NCCALCSIZE returns 0 (folding the frame into client area),
+        // DefWindowProc will only return HTCLIENT for edge pixels. We must detect
+        // resize zones ourselves by checking proximity to the window edges.
         POINT pt;
         pt.x = GET_X_LPARAM(msg->lParam);
         pt.y = GET_Y_LPARAM(msg->lParam);
-        
+
+        if (!isMaximized()) {
+            RECT winRect;
+            GetWindowRect(msg->hwnd, &winRect);
+
+            const int border = 6; // resize grip width in screen pixels
+            bool onLeft   = pt.x < winRect.left   + border;
+            bool onRight  = pt.x >= winRect.right  - border;
+            bool onTop    = pt.y < winRect.top     + border;
+            bool onBottom = pt.y >= winRect.bottom - border;
+
+            if (onLeft  && onTop)    { *result = HTTOPLEFT;     return true; }
+            if (onRight && onTop)    { *result = HTTOPRIGHT;    return true; }
+            if (onLeft  && onBottom) { *result = HTBOTTOMLEFT;  return true; }
+            if (onRight && onBottom) { *result = HTBOTTOMRIGHT; return true; }
+            if (onLeft)              { *result = HTLEFT;        return true; }
+            if (onRight)             { *result = HTRIGHT;       return true; }
+            if (onTop)               { *result = HTTOP;         return true; }
+            if (onBottom)            { *result = HTBOTTOM;      return true; }
+        }
+
+        // Check if cursor is over the CustomTitleBar
         if (m_titleBar) {
             double dpi = devicePixelRatioF();
             QPoint globalPos(pt.x / dpi, pt.y / dpi);
             QPoint localPos = m_titleBar->mapFromGlobal(globalPos);
-            
+
             if (m_titleBar->rect().contains(localPos)) {
+                // Window control buttons → let Qt handle
                 if (m_titleBar->isOverButton(globalPos)) {
-                    // Let Qt handle the mouse event for the buttons
                     return false;
                 }
-                *result = HTCAPTION; // Allow dragging the window
+                // Embedded menu bar → let Qt handle so menus open
+                QMenuBar* mb = m_titleBar->menuBar();
+                if (mb) {
+                    QPoint mbLocal = mb->mapFromGlobal(globalPos);
+                    if (mb->rect().contains(mbLocal)) {
+                        return false;
+                    }
+                }
+                // Bare title area → caption drag
+                *result = HTCAPTION;
                 return true;
             }
         }
@@ -673,6 +687,7 @@ void MainWindow::newProject()
     if (!m_engine) return;
     m_engine->clearProject();
     m_currentProjectPath.clear();
+    m_titleBar->setProjectName("");
     rebuildTrackUI();
 }
 
@@ -715,6 +730,8 @@ void MainWindow::openProject()
 
     loadingPopup.close();
     m_currentProjectPath = fileName;
+    // Show the project name (file name without extension) in title bar
+    m_titleBar->setProjectName(QFileInfo(fileName).baseName());
     rebuildTrackUI();
 }
 
@@ -742,6 +759,7 @@ void MainWindow::saveProjectAs()
     if (fileName.isEmpty()) return;
     
     m_currentProjectPath = fileName;
+    m_titleBar->setProjectName(QFileInfo(fileName).baseName());
     saveProject();
 }
 
