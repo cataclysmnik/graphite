@@ -124,6 +124,7 @@ void TimeRulerWidget::mousePressEvent(QMouseEvent* event)
         double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
         m_selectionAnchorTime = timeSecs;
         m_isSelectingTime = true;
+        m_draggedSelection = false;
         
         if (m_engine) {
             // Do not clear the selection, just set the playhead
@@ -136,6 +137,7 @@ void TimeRulerWidget::mousePressEvent(QMouseEvent* event)
 void TimeRulerWidget::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_isSelectingTime && (event->buttons() & Qt::LeftButton)) {
+        m_draggedSelection = true;
         int absoluteX = event->position().x();
         double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
         
@@ -158,7 +160,7 @@ void TimeRulerWidget::mouseReleaseEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
         m_isSelectingTime = false;
-        if (m_engine && m_engine->getLoopEnd() > m_engine->getLoopStart() + 0.01) {
+        if (m_draggedSelection && m_engine && m_engine->getLoopEnd() > m_engine->getLoopStart() + 0.01) {
             m_engine->setPlayheadPosition(m_engine->getLoopStart());
         }
         update();
@@ -231,8 +233,10 @@ void TimelineLanesWidget::onPlayheadTimerTick()
                 int playheadX = currentPlayhead * m_pixelsPerSecond;
                 emit requestScroll(playheadX);
             }
+            update();
+        } else if (m_engine->isEngineRecording() || m_engine->getStateVersion() != m_lastStateVersion) {
+            update();
         }
-        update(); // Always unconditionally repaint (e.g. for recording updates, clip modifications)
     }
 }
 
@@ -263,7 +267,11 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
     
     // Draw Track Lanes and Clips dynamically
     if (m_engine) {
-        auto tracks = m_engine->getTracksSnapshot();
+        if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+            m_cachedTracks = m_engine->getTracksSnapshot();
+            m_lastStateVersion = m_engine->getStateVersion();
+        }
+        const auto& tracks = m_cachedTracks;
         
         // Dynamically set height if tracks exist
         int expectedHeight = tracks.size() * (m_trackHeight + 4); // TrackCard + 4px margin
@@ -514,7 +522,12 @@ HitTestResult TimelineLanesWidget::hitTest(const QPoint& pos)
     HitTestResult result;
     if (!m_engine) return result;
     
-    auto tracks = m_engine->getTracksSnapshot();
+    if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+        m_cachedTracks = m_engine->getTracksSnapshot();
+        m_lastStateVersion = m_engine->getStateVersion();
+    }
+    const auto& tracks = m_cachedTracks;
+    
     int trackHeight = m_trackHeight;
     int trackMargin = 4;
     int yOffset = 0;
@@ -555,7 +568,12 @@ void TimelineLanesWidget::mousePressEvent(QMouseEvent* event)
             m_draggingItemId = hit.itemId;
             m_draggingTrackIndex = hit.trackIndex;
             
-            auto tracks = m_engine->getTracksSnapshot();
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            const auto& tracks = m_cachedTracks;
+            
             for (const auto& item : tracks[hit.trackIndex].items) {
                 if (item.id == hit.itemId) {
                     int startX = item.startTimeSecs * m_pixelsPerSecond;
@@ -620,7 +638,12 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         if (m_engine) {
-            auto tracks = m_engine->getTracksSnapshot();
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            const auto& tracks = m_cachedTracks;
+            
             for (const auto& track : tracks) {
                 for (const auto& item : track.items) {
                     if (item.isSelected) {
@@ -633,7 +656,12 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
     } else if (event->key() == Qt::Key_S) {
         if (m_engine) {
             double splitTime = m_engine->getPlayheadTime();
-            auto tracks = m_engine->getTracksSnapshot();
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            const auto& tracks = m_cachedTracks;
+            
             for (const auto& track : tracks) {
                 for (const auto& item : track.items) {
                     if (item.isSelected && splitTime > item.startTimeSecs && splitTime < (item.startTimeSecs + item.durationSecs)) {
@@ -650,7 +678,12 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
     } else if (event->matches(QKeySequence::Copy)) {
         if (m_engine) {
             m_clipboardItems.clear();
-            auto tracks = m_engine->getTracksSnapshot();
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            const auto& tracks = m_cachedTracks;
+            
             for (size_t t = 0; t < tracks.size(); ++t) {
                 for (const auto& item : tracks[t].items) {
                     if (item.isSelected) {
@@ -735,7 +768,12 @@ void TimelineLanesWidget::contextMenuEvent(QContextMenuEvent* event)
             update();
         } else if (selected == copyAction) {
             m_clipboardItems.clear();
-            auto tracks = m_engine->getTracksSnapshot();
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            const auto& tracks = m_cachedTracks;
+            
             for (size_t t = 0; t < tracks.size(); ++t) {
                 for (const auto& item : tracks[t].items) {
                     if (item.id == hit.itemId) {

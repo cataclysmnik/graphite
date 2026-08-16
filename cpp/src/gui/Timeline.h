@@ -36,6 +36,7 @@ private:
     dsp::AudioEngine* m_engine;
     double m_pixelsPerSecond { 50.0 };
     bool m_isSelectingTime { false };
+    bool m_draggedSelection { false };
     double m_selectionAnchorTime { 0.0 };
 };
 
@@ -84,6 +85,9 @@ private:
     dsp::AudioEngine* m_engine;
     double m_pixelsPerSecond { 50.0 };
     int m_trackHeight { 100 };
+    
+    uint32_t m_lastStateVersion { 0xffffffff };
+    std::vector<dsp::Track> m_cachedTracks;
     
     QTimer m_playheadTimer;
     

@@ -65,7 +65,7 @@ public:
     
     // Project dirty state tracking
     bool isProjectDirty() const { return m_isProjectDirty.load(); }
-    void markProjectDirty() { m_isProjectDirty = true; }
+    void markProjectDirty() { m_isProjectDirty = true; m_stateVersion.fetch_add(1, std::memory_order_relaxed); }
     void clearProjectDirty() { m_isProjectDirty = false; }
     
     // Track State Getters (thread safe-ish for UI)
@@ -75,6 +75,7 @@ public:
     float getTrackPan(int trackIndex) const;
     
     std::vector<Track> getTracksSnapshot() const;
+    uint32_t getStateVersion() const { return m_stateVersion.load(std::memory_order_relaxed); }
     
     // Live Recording Getters
     const juce::AudioBuffer<float>* getRecordBuffer(int trackId) const;
@@ -111,6 +112,7 @@ private:
     std::atomic<bool> isRecording { false };
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> playheadTimeSeconds { 0.0 };
+    std::atomic<uint32_t> m_stateVersion { 0 };
     
     std::atomic<bool> m_isLooping { false };
     std::atomic<double> m_loopStartSecs { 0.0 };
