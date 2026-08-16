@@ -561,8 +561,29 @@ void TimelineLanesWidget::mousePressEvent(QMouseEvent* event)
         
         if (hit.itemId != -1) {
             // Clicked on a clip
-            m_engine->clearAudioItemSelection();
-            m_engine->setAudioItemSelection(hit.itemId, true);
+            bool shiftPressed = (event->modifiers() & Qt::ShiftModifier);
+            
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            
+            bool isAlreadySelected = false;
+            for (const auto& t : m_cachedTracks) {
+                for (const auto& i : t.items) {
+                    if (i.id == hit.itemId) {
+                        isAlreadySelected = i.isSelected;
+                        break;
+                    }
+                }
+            }
+            
+            if (shiftPressed) {
+                m_engine->setAudioItemSelection(hit.itemId, !isAlreadySelected);
+            } else {
+                m_engine->clearAudioItemSelection();
+                m_engine->setAudioItemSelection(hit.itemId, true);
+            }
             
             // Start drag
             m_draggingItemId = hit.itemId;
@@ -586,12 +607,15 @@ void TimelineLanesWidget::mousePressEvent(QMouseEvent* event)
         } else {
             // Clicked empty space
             m_engine->clearAudioItemSelection();
-            setPlayheadFromMouse(event);
+            update();
         }
     } else if (event->button() == Qt::RightButton) {
         HitTestResult hit = hitTest(event->pos());
         if (hit.itemId != -1) {
-            m_engine->clearAudioItemSelection();
+            bool shiftPressed = (event->modifiers() & Qt::ShiftModifier);
+            if (!shiftPressed) {
+                m_engine->clearAudioItemSelection();
+            }
             m_engine->setAudioItemSelection(hit.itemId, true);
             update();
         }
@@ -616,9 +640,6 @@ void TimelineLanesWidget::mouseMoveEvent(QMouseEvent* event)
                 m_draggingTrackIndex = newTrackIndex;
             }
             update();
-        } else {
-            // Scrubbing playhead
-            setPlayheadFromMouse(event);
         }
     }
 }
@@ -636,7 +657,28 @@ void TimelineLanesWidget::mouseReleaseEvent(QMouseEvent* event)
 
 void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
 {
-    if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+    if (event->key() == Qt::Key_Home) {
+        if (m_engine) {
+            m_engine->setPlayheadPosition(0.0);
+            update();
+        }
+    } else if (event->key() == Qt::Key_End) {
+        if (m_engine) {
+            double maxEndTime = 0.0;
+            if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
+                m_cachedTracks = m_engine->getTracksSnapshot();
+                m_lastStateVersion = m_engine->getStateVersion();
+            }
+            for (const auto& track : m_cachedTracks) {
+                for (const auto& item : track.items) {
+                    double end = item.startTimeSecs + item.durationSecs;
+                    if (end > maxEndTime) maxEndTime = end;
+                }
+            }
+            m_engine->setPlayheadPosition(maxEndTime);
+            update();
+        }
+    } else if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         if (m_engine) {
             if (m_engine->getStateVersion() != m_lastStateVersion || m_cachedTracks.empty()) {
                 m_cachedTracks = m_engine->getTracksSnapshot();

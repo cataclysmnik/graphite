@@ -646,6 +646,7 @@ void AudioEngine::processMessages()
                             }
                         }
                     }
+                    markProjectDirty();
                     break;
                 }
                 case EngineCommandType::DeleteTrack: {
