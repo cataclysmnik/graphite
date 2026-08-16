@@ -202,6 +202,8 @@ void MainWindow::setupUi()
         m_trackCards.push_back(card);
         connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
         connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
+        connect(card, &TrackCard::deleteRequested, this, &MainWindow::onTrackDeleteRequested);
+        connect(card, &TrackCard::duplicateRequested, this, &MainWindow::onTrackDuplicateRequested);
     }
     
     // Add Track Button
@@ -293,6 +295,16 @@ void MainWindow::setupUi()
     recordShortcut->setAutoRepeat(false);
     connect(recordShortcut, &QShortcut::activated, this, &MainWindow::toggleRecording);
     
+    // Duplicate Track shortcut
+    QShortcut* duplicateTrackShortcut = new QShortcut(QKeySequence("Ctrl+D"), this);
+    duplicateTrackShortcut->setContext(Qt::ApplicationShortcut);
+    connect(duplicateTrackShortcut, &QShortcut::activated, this, [this]() {
+        if (m_selectedTrackIndex >= 0) {
+            onTrackDuplicateRequested(m_selectedTrackIndex);
+        }
+    });
+    
+
     m_timeline = new TimelineContainer(m_engine, timelinePanel);
     m_timeline->setObjectName("TimelineContainer");
     timelineLayout->addWidget(m_timeline);
@@ -340,6 +352,13 @@ void MainWindow::setupUi()
             m_mainSplitter->setSizes({ h - newDockH, newDockH });
             btnDockToggle->setText("▼");
         }
+    });
+    
+    // Toggle Mixer shortcut
+    QShortcut* toggleMixerShortcut = new QShortcut(QKeySequence("Ctrl+M"), this);
+    toggleMixerShortcut->setContext(Qt::ApplicationShortcut);
+    connect(toggleMixerShortcut, &QShortcut::activated, this, [btnDockToggle]() {
+        btnDockToggle->click(); // Re-use the existing dock toggle button logic
     });
     
     MixerPanel* mixerTab = new MixerPanel(m_engine, m_bottomDock);
@@ -616,6 +635,36 @@ void MainWindow::onTrackArmed(int index, bool armed)
     }
 }
 
+void MainWindow::onTrackDeleteRequested(int index)
+{
+    if (index < 0 || index >= m_trackCards.size()) return;
+    
+    if (QMessageBox::question(this, "Delete Track", "Are you sure you want to delete this track and all its audio items?") == QMessageBox::Yes) {
+        if (m_engine) {
+            dsp::EngineMessage msg;
+            msg.type = dsp::EngineCommandType::DeleteTrack;
+            msg.trackIndex = index;
+            m_engine->sendMessageFromUI(msg);
+            
+            QTimer::singleShot(50, this, &MainWindow::rebuildTrackUI);
+        }
+    }
+}
+
+void MainWindow::onTrackDuplicateRequested(int index)
+{
+    if (index < 0 || index >= m_trackCards.size()) return;
+    
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::DuplicateTrack;
+        msg.trackIndex = index;
+        m_engine->sendMessageFromUI(msg);
+        
+        QTimer::singleShot(50, this, &MainWindow::rebuildTrackUI);
+    }
+}
+
 void MainWindow::openAudioSettings()
 {
     if (m_deviceManager) {
@@ -690,6 +739,8 @@ void MainWindow::addTrack()
     m_trackCards.push_back(card);
     connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
     connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
+    connect(card, &TrackCard::deleteRequested, this, &MainWindow::onTrackDeleteRequested);
+    connect(card, &TrackCard::duplicateRequested, this, &MainWindow::onTrackDuplicateRequested);
     
     // Notify timeline to redraw
     auto* timeline = findChild<TimelineContainer*>();
@@ -701,11 +752,19 @@ void MainWindow::addTrack()
 void MainWindow::togglePlayback()
 {
     if (m_engine) {
+        if (!m_isPlaying) {
+            // Starting playback
+            m_playbackStartPosition = m_engine->getPlayheadTime();
+        }
+        
         m_isPlaying = !m_isPlaying;
         m_engine->setPlaying(m_isPlaying);
         
         if (!m_isPlaying) {
             m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+            // Return playhead to start position
+            m_engine->setPlayheadPosition(m_playbackStartPosition);
+            
             // Also stop recording if we stop playback
             if (m_isRecording) {
                 m_isRecording = false;
@@ -905,6 +964,8 @@ void MainWindow::rebuildTrackUI()
             m_trackCards.push_back(card);
             connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
             connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
+            connect(card, &TrackCard::deleteRequested, this, &MainWindow::onTrackDeleteRequested);
+            connect(card, &TrackCard::duplicateRequested, this, &MainWindow::onTrackDuplicateRequested);
         }
     }
     
@@ -917,6 +978,8 @@ void MainWindow::rebuildTrackUI()
         for (auto* strip : m_mixerStrips) {
             if (strip->getTrackIndex() != -1) {
                 connect(strip, &MixerStrip::clicked, this, &MainWindow::selectTrack);
+                connect(strip, &MixerStrip::deleteRequested, this, &MainWindow::onTrackDeleteRequested);
+                connect(strip, &MixerStrip::duplicateRequested, this, &MainWindow::onTrackDuplicateRequested);
             }
         }
     }

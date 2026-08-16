@@ -146,9 +146,8 @@ void TimelineLanesWidget::onPlayheadTimerTick()
                 int playheadX = currentPlayhead * m_pixelsPerSecond;
                 emit requestScroll(playheadX);
             }
-            
-            update(); // Repaint the playhead
         }
+        update(); // Always unconditionally repaint (e.g. for recording updates, clip modifications)
     }
 }
 
@@ -524,7 +523,6 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
 {
     if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
         if (m_engine) {
-            // Find selected items and delete them
             auto tracks = m_engine->getTracksSnapshot();
             for (const auto& track : tracks) {
                 for (const auto& item : track.items) {
@@ -535,6 +533,81 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
             }
             update();
         }
+    } else if (event->key() == Qt::Key_S) {
+        if (m_engine) {
+            double splitTime = m_engine->getPlayheadTime();
+            auto tracks = m_engine->getTracksSnapshot();
+            for (const auto& track : tracks) {
+                for (const auto& item : track.items) {
+                    if (item.isSelected && splitTime > item.startTimeSecs && splitTime < (item.startTimeSecs + item.durationSecs)) {
+                        dsp::EngineMessage msg;
+                        msg.type = dsp::EngineCommandType::SplitAudioItem;
+                        msg.itemId = item.id;
+                        msg.doubleValue = splitTime;
+                        m_engine->sendMessageFromUI(msg);
+                    }
+                }
+            }
+            update();
+        }
+    } else if (event->matches(QKeySequence::Copy)) {
+        if (m_engine) {
+            m_clipboardItems.clear();
+            auto tracks = m_engine->getTracksSnapshot();
+            for (size_t t = 0; t < tracks.size(); ++t) {
+                for (const auto& item : tracks[t].items) {
+                    if (item.isSelected) {
+                        ClipboardItem clipItem;
+                        clipItem.trackIndex = (int)t;
+                        clipItem.item = item;
+                        m_clipboardItems.push_back(clipItem);
+                    }
+                }
+            }
+        }
+    } else if (event->matches(QKeySequence::Paste)) {
+        if (m_engine && !m_clipboardItems.empty()) {
+            double playheadTime = m_engine->getPlayheadTime();
+            double earliestTime = m_clipboardItems[0].item.startTimeSecs;
+            for (const auto& clip : m_clipboardItems) {
+                if (clip.item.startTimeSecs < earliestTime) earliestTime = clip.item.startTimeSecs;
+            }
+            
+            for (const auto& clip : m_clipboardItems) {
+                dsp::AudioItem* newItem = new dsp::AudioItem(clip.item);
+                newItem->id = -1;
+                newItem->startTimeSecs = playheadTime + (newItem->startTimeSecs - earliestTime);
+                newItem->isSelected = true; // Select newly pasted items
+                
+                dsp::EngineMessage msg;
+                msg.type = dsp::EngineCommandType::AddAudioItem;
+                msg.trackIndex = clip.trackIndex;
+                msg.ptrValue = newItem;
+                m_engine->sendMessageFromUI(msg);
+            }
+            
+            // Clear current selection
+            m_engine->clearAudioItemSelection();
+            update();
+        }
+    } else if (event->key() == Qt::Key_Home) {
+        if (m_engine) {
+            m_engine->setPlayheadPosition(0.0);
+            update();
+        }
+    } else if (event->key() == Qt::Key_End) {
+        if (m_engine) {
+            double maxEndTime = 0.0;
+            auto tracks = m_engine->getTracksSnapshot();
+            for (const auto& track : tracks) {
+                for (const auto& item : track.items) {
+                    double end = item.startTimeSecs + item.durationSecs;
+                    if (end > maxEndTime) maxEndTime = end;
+                }
+            }
+            m_engine->setPlayheadPosition(maxEndTime);
+            update();
+        }
     } else {
         QWidget::keyPressEvent(event);
     }
@@ -543,13 +616,68 @@ void TimelineLanesWidget::keyPressEvent(QKeyEvent* event)
 void TimelineLanesWidget::contextMenuEvent(QContextMenuEvent* event)
 {
     HitTestResult hit = hitTest(event->pos());
+    QMenu menu(this);
+    
     if (hit.itemId != -1 && m_engine) {
-        QMenu menu(this);
-        QAction* deleteAction = menu.addAction("Delete Clip");
+        QAction* copyAction = menu.addAction("Copy Clip (Ctrl+C)");
+        QAction* splitAction = menu.addAction("Split Clip at Playhead (S)");
+        menu.addSeparator();
+        QAction* deleteAction = menu.addAction("Delete Clip (Del)");
         
         QAction* selected = menu.exec(event->globalPos());
         if (selected == deleteAction) {
             m_engine->deleteAudioItem(hit.itemId);
+            update();
+        } else if (selected == splitAction) {
+            double splitTime = m_engine->getPlayheadTime();
+            dsp::EngineMessage msg;
+            msg.type = dsp::EngineCommandType::SplitAudioItem;
+            msg.itemId = hit.itemId;
+            msg.doubleValue = splitTime;
+            m_engine->sendMessageFromUI(msg);
+            update();
+        } else if (selected == copyAction) {
+            m_clipboardItems.clear();
+            auto tracks = m_engine->getTracksSnapshot();
+            for (size_t t = 0; t < tracks.size(); ++t) {
+                for (const auto& item : tracks[t].items) {
+                    if (item.id == hit.itemId) {
+                        ClipboardItem clipItem;
+                        clipItem.trackIndex = (int)t;
+                        clipItem.item = item;
+                        m_clipboardItems.push_back(clipItem);
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        // Background click
+        QAction* pasteAction = menu.addAction("Paste (Ctrl+V)");
+        pasteAction->setEnabled(!m_clipboardItems.empty());
+        
+        QAction* selected = menu.exec(event->globalPos());
+        if (selected == pasteAction && m_engine && !m_clipboardItems.empty()) {
+            double playheadTime = m_engine->getPlayheadTime();
+            double earliestTime = m_clipboardItems[0].item.startTimeSecs;
+            for (const auto& clip : m_clipboardItems) {
+                if (clip.item.startTimeSecs < earliestTime) earliestTime = clip.item.startTimeSecs;
+            }
+            
+            m_engine->clearAudioItemSelection();
+            
+            for (const auto& clip : m_clipboardItems) {
+                dsp::AudioItem* newItem = new dsp::AudioItem(clip.item);
+                newItem->id = -1;
+                newItem->startTimeSecs = playheadTime + (newItem->startTimeSecs - earliestTime);
+                newItem->isSelected = true;
+                
+                dsp::EngineMessage msg;
+                msg.type = dsp::EngineCommandType::AddAudioItem;
+                msg.trackIndex = clip.trackIndex;
+                msg.ptrValue = newItem;
+                m_engine->sendMessageFromUI(msg);
+            }
             update();
         }
     }

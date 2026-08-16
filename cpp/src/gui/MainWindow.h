@@ -62,6 +62,9 @@ private slots:
     
     void onTrackCardClicked(int index);
     void onTrackArmed(int index, bool armed);
+    
+    void onTrackDeleteRequested(int index);
+    void onTrackDuplicateRequested(int index);
 
 private:
     void setupUi();
@@ -94,6 +97,7 @@ private:
     
     bool m_isRecording = false;
     bool m_isPlaying = false;
+    double m_playbackStartPosition = 0.0;
     
     QString m_currentProjectPath;
     

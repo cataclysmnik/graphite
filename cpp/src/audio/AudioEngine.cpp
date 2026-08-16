@@ -398,10 +398,8 @@ void AudioEngine::loadAudioFileSynchronous(int trackIndex, double startTimeSecs,
     
     // Create the item
     AudioItem* item = new AudioItem(); // Will be owned by the track vector, must handle pointer cleanup carefully!
-    // Wait, the LockFree queue takes raw pointer, but the track vector takes by value. So we allocate raw here, and the audio thread will take ownership or copy it.
-    // Let's allocate it, and the audio thread will dereference, copy to track, and delete the pointer.
     
-    item->id = ++m_nextItemId; // Unique ID
+    item->id = -1; // Engine will assign ID
     item->startTimeSecs = startTimeSecs;
     item->offsetSecs = 0.0;
     item->durationSecs = (double)numSamples / targetSampleRate;
@@ -640,11 +638,90 @@ void AudioEngine::processMessages()
                     }
                     break;
                 }
+                case EngineCommandType::DeleteTrack: {
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        tracks.erase(tracks.begin() + msg.trackIndex);
+                        for (size_t i = 0; i < tracks.size(); ++i) tracks[i].id = (int)i; // Reassign IDs
+                        markProjectDirty();
+                    }
+                    break;
+                }
+                case EngineCommandType::DuplicateTrack: {
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        const Track& src = tracks[msg.trackIndex];
+                        Track dup;
+                        dup.id = tracks.size();
+                        dup.name = src.name + " (Copy)";
+                        dup.volume = src.volume;
+                        dup.pan = src.pan;
+                        dup.isMuted = src.isMuted;
+                        dup.isSolo = src.isSolo;
+                        dup.isArmed = src.isArmed;
+                        dup.inputChannel = src.inputChannel;
+                        dup.items = src.items; // Copies the vector of AudioItems
+                        
+                        for (auto& item : dup.items) {
+                            item.id = ++m_nextItemId;
+                        }
+                        
+                        tracks.push_back(std::move(dup));
+                        markProjectDirty();
+                    }
+                    break;
+                }
+                case EngineCommandType::SplitAudioItem: {
+                    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                    for (auto& track : tracks) {
+                        for (size_t i = 0; i < track.items.size(); ++i) {
+                            if (track.items[i].id == msg.itemId) {
+                                double splitTime = msg.doubleValue;
+                                if (splitTime > track.items[i].startTimeSecs && splitTime < (track.items[i].startTimeSecs + track.items[i].durationSecs)) {
+                                    double firstDuration = splitTime - track.items[i].startTimeSecs;
+                                    
+                                    AudioItem secondItem = track.items[i];
+                                    secondItem.id = ++m_nextItemId;
+                                    secondItem.startTimeSecs = splitTime;
+                                    secondItem.offsetSecs += firstDuration;
+                                    secondItem.durationSecs -= firstDuration;
+                                    secondItem.isSelected = false;
+                                    
+                                    track.items[i].durationSecs = firstDuration;
+                                    track.items.push_back(secondItem);
+                                    markProjectDirty();
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    break;
+                }
+                case EngineCommandType::ResizeAudioItem: {
+                    if (msg.ptrValue) {
+                        AudioItem* updatedItem = static_cast<AudioItem*>(msg.ptrValue);
+                        std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                        for (auto& track : tracks) {
+                            for (auto& item : track.items) {
+                                if (item.id == updatedItem->id) {
+                                    item.startTimeSecs = updatedItem->startTimeSecs;
+                                    item.offsetSecs = updatedItem->offsetSecs;
+                                    item.durationSecs = updatedItem->durationSecs;
+                                    markProjectDirty();
+                                    break;
+                                }
+                            }
+                        }
+                        delete updatedItem;
+                    }
+                    break;
+                }
                 case EngineCommandType::AddAudioItem: {
                     if (msg.ptrValue) {
                         AudioItem* item = static_cast<AudioItem*>(msg.ptrValue);
                         if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                             std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                            if (item->id == -1) item->id = ++m_nextItemId;
                             tracks[msg.trackIndex].items.push_back(*item);
                             markProjectDirty();
                         }

@@ -4,6 +4,10 @@
 #include <QHBoxLayout>
 #include <QFrame>
 #include <QStyle>
+#include <QMouseEvent>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QAction>
 
 namespace gui {
 
@@ -69,6 +73,7 @@ MixerStrip::MixerStrip(int trackIndex, const QString& trackName, dsp::AudioEngin
         }
         QSlider::handle:horizontal:hover {
             background: #ffffff;
+        }
         QProgressBar {
             background-color: #1a1a1c;
             border: 1px solid #222225;
@@ -184,8 +189,24 @@ void MixerStrip::updateMeters()
 
 void MixerStrip::mousePressEvent(QMouseEvent* event)
 {
-    emit clicked(m_trackIndex);
-    QWidget::mousePressEvent(event);
+    if (event->button() == Qt::LeftButton) {
+        emit clicked(m_trackIndex);
+    }
+}
+
+void MixerStrip::contextMenuEvent(QContextMenuEvent* event)
+{
+    QMenu menu(this);
+    
+    QAction* dupAction = menu.addAction("Duplicate Track");
+    QAction* delAction = menu.addAction("Delete Track");
+    
+    QAction* selected = menu.exec(event->globalPos());
+    if (selected == dupAction) {
+        emit duplicateRequested(m_trackIndex);
+    } else if (selected == delAction) {
+        emit deleteRequested(m_trackIndex);
+    }
 }
 
 void MixerStrip::setSelected(bool selected)

@@ -3,6 +3,9 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QMouseEvent>
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QAction>
 
 namespace gui {
 
@@ -147,8 +150,30 @@ void TrackCard::updateMeters()
 
 void TrackCard::mousePressEvent(QMouseEvent* event)
 {
-    emit clicked(m_trackIndex);
+    if (event->button() == Qt::LeftButton) {
+        emit clicked(m_trackIndex);
+    }
     event->ignore(); // allow QListWidget to process drag
+}
+
+void TrackCard::contextMenuEvent(QContextMenuEvent* event)
+{
+    QMenu menu(this);
+    
+    QAction* renameAction = menu.addAction("Rename Track");
+    menu.addSeparator();
+    QAction* dupAction = menu.addAction("Duplicate Track");
+    QAction* delAction = menu.addAction("Delete Track");
+    
+    QAction* selected = menu.exec(event->globalPos());
+    if (selected == renameAction) {
+        m_nameEdit->setFocus();
+        m_nameEdit->selectAll();
+    } else if (selected == dupAction) {
+        emit duplicateRequested(m_trackIndex);
+    } else if (selected == delAction) {
+        emit deleteRequested(m_trackIndex);
+    }
 }
 
 void TrackCard::setSelected(bool selected)

@@ -3,6 +3,9 @@
 #include <QWidget>
 #include <QScrollArea>
 #include <QTimer>
+#include <vector>
+#include <utility>
+#include "../audio/AudioModels.h"
 
 namespace dsp {
     class AudioEngine;
@@ -33,6 +36,8 @@ private:
 struct HitTestResult {
     int trackIndex = -1;
     int itemId = -1;
+    enum class Edge { None, Left, Right };
+    Edge edge = Edge::None;
 };
 
 class TimelineLanesWidget : public QWidget
@@ -81,6 +86,18 @@ private:
     
     // Cache the playhead position to only update when it moves
     double m_lastPlayheadTime { 0.0 };
+    
+    struct ClipboardItem {
+        int trackIndex;
+        dsp::AudioItem item;
+
+        ClipboardItem() = default;
+        ClipboardItem(const ClipboardItem&) = default;
+        ClipboardItem& operator=(const ClipboardItem&) = default;
+        ClipboardItem(ClipboardItem&&) noexcept = default;
+        ClipboardItem& operator=(ClipboardItem&&) noexcept = default;
+    };
+    std::vector<ClipboardItem> m_clipboardItems;
 };
 
 

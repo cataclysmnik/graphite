@@ -18,6 +18,12 @@ struct AudioItem {
     
     // In a real application, we'd store a lock-free reference to an audio buffer pool
     std::shared_ptr<juce::AudioBuffer<float>> buffer;
+
+    AudioItem() = default;
+    AudioItem(const AudioItem&) = default;
+    AudioItem& operator=(const AudioItem&) = default;
+    AudioItem(AudioItem&&) noexcept = default;
+    AudioItem& operator=(AudioItem&&) noexcept = default;
 };
 
 struct Track {
@@ -39,6 +45,12 @@ struct Track {
     
     // The plugin chain for this track
     std::vector<std::unique_ptr<juce::AudioProcessor>> plugins;
+
+    Track() = default;
+    Track(const Track&) = delete;
+    Track& operator=(const Track&) = delete;
+    Track(Track&&) noexcept = default;
+    Track& operator=(Track&&) noexcept = default;
 };
 
 // Messaging structures for the lock-free queue (Qt -> Audio Thread)
@@ -63,7 +75,13 @@ enum class EngineCommandType {
     DeleteAudioItem,
     MoveAudioItem,
     SelectAudioItem,
-    RenameTrack
+    RenameTrack,
+    DeleteTrack,
+    DuplicateTrack,
+    CopyAudioItem,
+    PasteAudioItem,
+    SplitAudioItem,
+    ResizeAudioItem
 };
 
 struct EngineMessage {

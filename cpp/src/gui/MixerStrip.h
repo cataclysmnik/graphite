@@ -23,9 +23,12 @@ public:
 
 signals:
     void clicked(int index);
+    void deleteRequested(int index);
+    void duplicateRequested(int index);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
 
 private slots:
     void onMuteToggled(bool checked);
