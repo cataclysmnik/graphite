@@ -200,7 +200,8 @@ void MainWindow::setupUi()
         TrackCard* card = new TrackCard(i, trackNames[i], m_engine, tcpList);
         tcpList->setItemWidget(item, card);
         m_trackCards.push_back(card);
-        connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
+        connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
+        connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
     }
     
     // Add Track Button
@@ -239,7 +240,14 @@ void MainWindow::setupUi()
     connect(btnStop, &QPushButton::clicked, [this]() {
         if (m_engine) {
             m_engine->setPlaying(false);
+            m_isPlaying = false;
             m_btnPlayPause->setIcon(QIcon(":/icons/play.svg"));
+            
+            if (m_isRecording) {
+                m_isRecording = false;
+                m_engine->setRecording(false);
+                m_btnRecord->setStyleSheet("color: #ff3333; font-size: 14px;");
+            }
         }
     });
     
@@ -524,17 +532,8 @@ void MainWindow::selectTrack(int index)
 {
     m_selectedTrackIndex = index;
     
-    // Apply arming logic based on mode
-    if (index >= 0 && index < m_trackCards.size()) {
-        if (m_armModeGroup->checkedId() == (int)ArmMode::Union) {
-            bool currentArm = m_trackCards[index]->isArmed();
-            m_trackCards[index]->setArmed(!currentArm);
-        } else if (m_armModeGroup->checkedId() == (int)ArmMode::Exclusive) {
-            for (int i = 0; i < m_trackCards.size(); ++i) {
-                m_trackCards[i]->setArmed(i == index);
-            }
-        }
-    }
+    // No longer toggles arm state simply by selecting the track
+
     
     // Update TrackCards visually
     for (size_t i = 0; i < m_trackCards.size(); ++i) {
@@ -559,6 +558,61 @@ void MainWindow::selectTrack(int index)
     // Update EffectsRack
     if (m_effectsRack) {
         m_effectsRack->updateForTrack(index);
+    }
+}
+
+void MainWindow::onTrackCardClicked(int index)
+{
+    selectTrack(index);
+    
+    // Apply arming logic if clicked in the TCP
+    if (index >= 0 && index < m_trackCards.size()) {
+        if (m_armModeGroup->checkedId() == (int)ArmMode::Union) {
+            bool currentArm = m_trackCards[index]->isArmed();
+            m_trackCards[index]->setArmed(!currentArm);
+        } else if (m_armModeGroup->checkedId() == (int)ArmMode::Exclusive) {
+            if (!m_trackCards[index]->isArmed()) {
+                m_trackCards[index]->setArmed(true);
+            } else {
+                // If it is already armed, we still want to enforce exclusivity 
+                // in case other tracks were manually armed.
+                onTrackArmed(index, true); 
+            }
+        }
+    }
+}
+
+void MainWindow::onTrackArmed(int index, bool armed)
+{
+    if (index < 0 || index >= m_trackCards.size()) return;
+    
+    if (m_armModeGroup->checkedId() == (int)ArmMode::Exclusive && armed) {
+        // Disarm all others
+        for (int i = 0; i < m_trackCards.size(); ++i) {
+            if (i != index && m_trackCards[i]->isArmed()) {
+                m_trackCards[i]->blockSignals(true);
+                m_trackCards[i]->setArmed(false);
+                m_trackCards[i]->blockSignals(false);
+                
+                // Send disarm to engine for others
+                if (m_engine) {
+                    dsp::EngineMessage msg;
+                    msg.type = dsp::EngineCommandType::SetTrackArm;
+                    msg.trackIndex = i;
+                    msg.boolValue = false;
+                    m_engine->sendMessageFromUI(msg);
+                }
+            }
+        }
+    }
+    
+    // Send arm to engine for the toggled track
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::SetTrackArm;
+        msg.trackIndex = index;
+        msg.boolValue = armed;
+        m_engine->sendMessageFromUI(msg);
     }
 }
 
@@ -634,7 +688,8 @@ void MainWindow::addTrack()
     TrackCard* card = new TrackCard(newTrackIndex, trackName, m_engine, tcpList);
     tcpList->setItemWidget(item, card);
     m_trackCards.push_back(card);
-    connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
+    connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
+    connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
     
     // Notify timeline to redraw
     auto* timeline = findChild<TimelineContainer*>();
@@ -763,6 +818,13 @@ void MainWindow::openProject(const QString& fileName, bool isTemplate)
 
     loadingPopup.close();
     
+    if (tree.hasProperty("armMode")) {
+        int armMode = tree.getProperty("armMode", (int)ArmMode::Standard);
+        if (auto* btn = m_armModeGroup->button(armMode)) {
+            btn->setChecked(true);
+        }
+    }
+    
     if (!isTemplate) {
         m_currentProjectPath = fileName;
         m_titleBar->setProjectName(QFileInfo(fileName).baseName());
@@ -785,12 +847,16 @@ bool MainWindow::saveProject()
     
     if (!m_engine) return false;
     
-    juce::ValueTree tree = m_engine->serializeProjectState();
+    juce::File projectFile(m_currentProjectPath.toStdString());
+    std::string projDir = projectFile.getParentDirectory().getFullPathName().toStdString();
+    juce::ValueTree tree = m_engine->serializeProjectState(projDir);
+    
+    tree.setProperty("armMode", m_armModeGroup->checkedId(), nullptr);
+    
     std::unique_ptr<juce::XmlElement> xml(tree.createXml());
     if (xml != nullptr) {
         juce::String xmlString = xml->createDocument(juce::String());
-        juce::File file(m_currentProjectPath.toStdString());
-        file.replaceWithText(xmlString);
+        projectFile.replaceWithText(xmlString);
         
         m_engine->clearProjectDirty();
         checkProjectDirty(); // update title immediately
@@ -830,9 +896,15 @@ void MainWindow::rebuildTrackUI()
             item->setSizeHint(QSize(0, 100)); // TrackCard height
             
             TrackCard* card = new TrackCard(tracks[i].id, QString::fromStdString(tracks[i].name), m_engine, tcpList);
+            
+            card->blockSignals(true);
+            card->setArmed(tracks[i].isArmed);
+            card->blockSignals(false);
+            
             tcpList->setItemWidget(item, card);
             m_trackCards.push_back(card);
-            connect(card, &TrackCard::clicked, this, &MainWindow::selectTrack);
+            connect(card, &TrackCard::clicked, this, &MainWindow::onTrackCardClicked);
+            connect(card, &TrackCard::armToggled, this, &MainWindow::onTrackArmed);
         }
     }
     

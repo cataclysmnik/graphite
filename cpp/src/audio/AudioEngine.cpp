@@ -183,8 +183,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
 
     // Process each track
     for (auto& track : tracks) {
-        if (track.isMuted && !track.isSolo) continue;
-        if (anySolo && !track.isSolo) continue;
+        bool skipMixdown = (track.isMuted && !track.isSolo) || (anySolo && !track.isSolo);
 
         // A temporary buffer for this track's stereo signal
         float trackLeft[MAX_BUFFER] = {0.0f};
@@ -299,13 +298,15 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         track.peakR = std::max(std::abs(absMaxR), std::abs(absMinR));
         
         // Sum into master output
-        if (numOutputChannels >= 2) {
-            juce::FloatVectorOperations::add(outputChannelData[0], trackLeft, samplesToProcess);
-            juce::FloatVectorOperations::add(outputChannelData[1], trackRight, samplesToProcess);
-        } else if (numOutputChannels == 1) {
-            // Mono output device fallback
-            juce::FloatVectorOperations::add(outputChannelData[0], trackLeft, samplesToProcess);
-            juce::FloatVectorOperations::add(outputChannelData[0], trackRight, samplesToProcess);
+        if (!skipMixdown) {
+            if (numOutputChannels >= 2) {
+                juce::FloatVectorOperations::add(outputChannelData[0], trackLeft, samplesToProcess);
+                juce::FloatVectorOperations::add(outputChannelData[1], trackRight, samplesToProcess);
+            } else if (numOutputChannels == 1) {
+                // Mono output device fallback
+                juce::FloatVectorOperations::add(outputChannelData[0], trackLeft, samplesToProcess);
+                juce::FloatVectorOperations::add(outputChannelData[0], trackRight, samplesToProcess);
+            }
         }
     }
     
@@ -400,7 +401,7 @@ void AudioEngine::loadAudioFileSynchronous(int trackIndex, double startTimeSecs,
     // Wait, the LockFree queue takes raw pointer, but the track vector takes by value. So we allocate raw here, and the audio thread will take ownership or copy it.
     // Let's allocate it, and the audio thread will dereference, copy to track, and delete the pointer.
     
-    item->id = std::rand(); // Simple ID for now
+    item->id = ++m_nextItemId; // Unique ID
     item->startTimeSecs = startTimeSecs;
     item->offsetSecs = 0.0;
     item->durationSecs = (double)numSamples / targetSampleRate;
@@ -499,7 +500,7 @@ void AudioEngine::processMessages()
                                     newBuf->copyFrom(1, 0, *m_recordBuffers[track.id], 1, 0, written);
                                     
                                     AudioItem item;
-                                    item.id = track.items.size() + 1000; // Unique ID
+                                    item.id = ++m_nextItemId; // Unique ID
                                     item.startTimeSecs = m_recordStartTimes[track.id];
                                     item.offsetSecs = 0.0;
                                     item.durationSecs = (double)written / currentSampleRate.load();
@@ -540,6 +541,13 @@ void AudioEngine::processMessages()
                 case EngineCommandType::SetTrackArm:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].isArmed = msg.boolValue;
+                        markProjectDirty();
+                    }
+                    break;
+                case EngineCommandType::RenameTrack:
+                    if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
+                        std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
+                        tracks[msg.trackIndex].name = msg.stringValue;
                         markProjectDirty();
                     }
                     break;
@@ -914,7 +922,7 @@ void AudioEngine::clearProject()
     }
 }
 
-juce::ValueTree AudioEngine::serializeProjectState()
+juce::ValueTree AudioEngine::serializeProjectState(const std::string& projectDirectory)
 {
     std::unique_lock<std::recursive_mutex> pluginLock(m_pluginMutex);
     std::lock_guard<std::recursive_mutex> trackLock(m_trackMutex);
@@ -923,7 +931,7 @@ juce::ValueTree AudioEngine::serializeProjectState()
     projectTree.setProperty("playheadTime", playheadTimeSeconds.load(), nullptr);
     
     juce::ValueTree tracksTree("Tracks");
-    for (const auto& track : tracks) {
+    for (auto& track : tracks) {
         juce::ValueTree trackTree("Track");
         trackTree.setProperty("id", track.id, nullptr);
         trackTree.setProperty("name", juce::String(track.name), nullptr);
@@ -935,9 +943,40 @@ juce::ValueTree AudioEngine::serializeProjectState()
         trackTree.setProperty("inputChannel", track.inputChannel, nullptr);
         
         juce::ValueTree itemsTree("Items");
-        for (const auto& item : track.items) {
+        for (auto& item : track.items) {
             juce::ValueTree itemTree("Item");
             itemTree.setProperty("id", item.id, nullptr);
+            
+            // Save in-memory recorded buffers to disk
+            if (item.filePath.empty() && item.buffer != nullptr) {
+                juce::File saveDir;
+                if (!projectDirectory.empty()) {
+                    saveDir = juce::File(projectDirectory).getChildFile("Media");
+                } else {
+                    saveDir = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("GraphiteMedia");
+                }
+                
+                if (!saveDir.exists()) saveDir.createDirectory();
+                
+                juce::String fileName = juce::String("Record_Track") + juce::String(track.id) + "_" + juce::String(item.id) + ".wav";
+                juce::File audioFile = saveDir.getChildFile(fileName);
+                
+                juce::WavAudioFormat wavFormat;
+                std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(
+                    new juce::FileOutputStream(audioFile), 
+                    currentSampleRate.load(), 
+                    item.buffer->getNumChannels(), 
+                    16, 
+                    {}, 
+                    0));
+                    
+                if (writer != nullptr) {
+                    writer->writeFromAudioSampleBuffer(*item.buffer, 0, item.buffer->getNumSamples());
+                }
+                
+                item.filePath = audioFile.getFullPathName().toStdString();
+            }
+            
             itemTree.setProperty("filePath", juce::String(item.filePath), nullptr);
             itemTree.setProperty("startTimeSecs", item.startTimeSecs, nullptr);
             itemTree.setProperty("offsetSecs", item.offsetSecs, nullptr);
@@ -1047,6 +1086,9 @@ void AudioEngine::deserializeProjectState(const juce::ValueTree& state, std::fun
                                     
                                     AudioItem item;
                                     item.id = itemTree.getProperty("id", std::rand());
+                                    if (item.id >= m_nextItemId.load()) {
+                                        m_nextItemId.store(item.id + 1);
+                                    }
                                     item.filePath = path.toStdString();
                                     item.startTimeSecs = itemTree.getProperty("startTimeSecs", 0.0);
                                     item.offsetSecs = itemTree.getProperty("offsetSecs", 0.0);

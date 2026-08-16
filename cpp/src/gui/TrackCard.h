@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QWidget>
-#include <QLabel>
+#include <QLineEdit>
 #include <QSlider>
 #include <QDial>
 #include <QPushButton>
@@ -24,6 +24,7 @@ public:
 
 signals:
     void clicked(int index);
+    void armToggled(int index, bool armed);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -33,6 +34,7 @@ private slots:
     void onSoloToggled(bool checked);
     void onArmToggled(bool checked);
     void onPanChanged(int value);
+    void onNameEditingFinished();
 
 public:
     void setSelected(bool selected);
@@ -48,7 +50,7 @@ private:
     int m_trackIndex;
     dsp::AudioEngine* m_engine;
 
-    QLabel* m_nameLabel;
+    QLineEdit* m_nameEdit;
     
     QPushButton* m_btnMute;
     QPushButton* m_btnSolo;

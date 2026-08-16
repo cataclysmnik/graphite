@@ -59,6 +59,9 @@ private slots:
     bool saveProjectAs();
     
     void rebuildTrackUI();
+    
+    void onTrackCardClicked(int index);
+    void onTrackArmed(int index, bool armed);
 
 private:
     void setupUi();

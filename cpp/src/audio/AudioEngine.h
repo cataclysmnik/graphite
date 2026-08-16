@@ -44,7 +44,7 @@ public:
     void loadAudioFileSynchronous(int trackIndex, double startTimeSecs, const juce::String& filePath);
     
     // Project state serialization
-    juce::ValueTree serializeProjectState();
+    juce::ValueTree serializeProjectState(const std::string& projectDirectory = "");
     void deserializeProjectState(const juce::ValueTree& state, std::function<void(float)> progressCallback = nullptr);
     void clearProject();
     
@@ -102,6 +102,7 @@ private:
     std::atomic<double> playheadTimeSeconds { 0.0 };
     std::atomic<int> selectedTrackIndex { 0 };
     std::atomic<bool> m_isProjectDirty { false };
+    std::atomic<int> m_nextItemId{1000};
     
     // Recording buffers
     std::vector<std::unique_ptr<juce::AudioBuffer<float>>> m_recordBuffers;

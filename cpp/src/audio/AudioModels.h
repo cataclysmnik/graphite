@@ -62,7 +62,8 @@ enum class EngineCommandType {
     SetPlayheadPosition,
     DeleteAudioItem,
     MoveAudioItem,
-    SelectAudioItem
+    SelectAudioItem,
+    RenameTrack
 };
 
 struct EngineMessage {

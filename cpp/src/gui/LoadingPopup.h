@@ -17,6 +17,9 @@ public:
 public slots:
     void setProgress(float progress); // No-op - indeterminate bar
     void onWorkFinished();
+    
+protected:
+    void showEvent(QShowEvent* event) override;
 
 private slots:
     void onCancelClicked();

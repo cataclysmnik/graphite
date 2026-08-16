@@ -60,9 +60,20 @@ TrackCard::TrackCard(int trackIndex, const QString& trackName, dsp::AudioEngine*
 
     // Header (Name + Mute/Solo/Arm)
     QHBoxLayout* headerLayout = new QHBoxLayout();
-    m_nameLabel = new QLabel(trackName, this);
-    m_nameLabel->setStyleSheet("font-weight: bold; color: #ffffff;");
-    headerLayout->addWidget(m_nameLabel);
+    m_nameEdit = new QLineEdit(trackName, this);
+    m_nameEdit->setStyleSheet(
+        "QLineEdit {"
+        "  background: transparent;"
+        "  border: 1px solid transparent;"
+        "  font-weight: bold; color: #ffffff;"
+        "}"
+        "QLineEdit:focus {"
+        "  background: #1a1a1c;"
+        "  border: 1px solid #44444c;"
+        "}"
+    );
+    connect(m_nameEdit, &QLineEdit::editingFinished, this, &TrackCard::onNameEditingFinished);
+    headerLayout->addWidget(m_nameEdit);
     
     headerLayout->addStretch();
     
@@ -149,6 +160,19 @@ void TrackCard::setSelected(bool selected)
     }
 }
 
+void TrackCard::onNameEditingFinished()
+{
+    QString newName = m_nameEdit->text();
+    if (m_engine) {
+        dsp::EngineMessage msg;
+        msg.type = dsp::EngineCommandType::RenameTrack;
+        msg.trackIndex = m_trackIndex;
+        std::strncpy(msg.stringValue, newName.toStdString().c_str(), sizeof(msg.stringValue) - 1);
+        m_engine->sendMessageFromUI(msg);
+    }
+    m_nameEdit->clearFocus();
+}
+
 void TrackCard::onMuteToggled(bool checked)
 {
     if (m_engine) {
@@ -173,13 +197,7 @@ void TrackCard::onSoloToggled(bool checked)
 
 void TrackCard::onArmToggled(bool checked)
 {
-    if (m_engine) {
-        dsp::EngineMessage msg;
-        msg.type = dsp::EngineCommandType::SetTrackArm;
-        msg.trackIndex = m_trackIndex;
-        msg.boolValue = checked;
-        m_engine->sendMessageFromUI(msg);
-    }
+    emit armToggled(m_trackIndex, checked);
 }
 
 void TrackCard::onPanChanged(int value)

@@ -1,6 +1,9 @@
 #include "LoadingPopup.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QShowEvent>
 
 namespace gui {
 
@@ -69,7 +72,20 @@ void LoadingPopup::onWorkFinished()
 void LoadingPopup::onCancelClicked()
 {
     m_wasCancelled = true;
-    reject();
+    close();
+}
+
+void LoadingPopup::showEvent(QShowEvent* event)
+{
+    QDialog::showEvent(event);
+    
+    if (parentWidget() && parentWidget()->isVisible()) {
+        auto parentRect = parentWidget()->geometry();
+        move(parentRect.center() - rect().center());
+    } else {
+        auto screenRect = QGuiApplication::primaryScreen()->geometry();
+        move(screenRect.center() - rect().center());
+    }
 }
 
 } // namespace gui
