@@ -20,16 +20,23 @@ public:
     explicit TimeRulerWidget(dsp::AudioEngine* engine, QWidget* parent = nullptr);
     void setZoom(double pixelsPerSecond);
 
+signals:
+    void timeSelectionChanged(double start, double end);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     
 private:
     void setPlayheadFromMouse(QMouseEvent* event);
 private:
     dsp::AudioEngine* m_engine;
     double m_pixelsPerSecond { 50.0 };
+    bool m_isSelectingTime { false };
+    double m_selectionAnchorTime { 0.0 };
 };
 
 
@@ -47,6 +54,7 @@ public:
     explicit TimelineLanesWidget(dsp::AudioEngine* engine, QWidget* parent = nullptr);
 
     void setZoom(double pixelsPerSecond);
+    void setTrackHeight(int height);
     
 signals:
     void requestScroll(int playheadX);
@@ -75,6 +83,8 @@ private slots:
 private:
     dsp::AudioEngine* m_engine;
     double m_pixelsPerSecond { 50.0 };
+    int m_trackHeight { 100 };
+    
     QTimer m_playheadTimer;
     
     // Dragging state

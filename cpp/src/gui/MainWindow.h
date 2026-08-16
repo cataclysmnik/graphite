@@ -40,6 +40,7 @@ protected:
     bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
 #endif
     void closeEvent(QCloseEvent* event) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
     void selectTrack(int index);
@@ -105,6 +106,8 @@ private:
     
     QTimer m_dirtyCheckTimer;
     bool m_lastKnownDirty = false;
+    
+    int m_trackHeight = 100;
 };
 
 } // namespace gui

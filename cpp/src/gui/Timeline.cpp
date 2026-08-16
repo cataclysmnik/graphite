@@ -47,6 +47,27 @@ void TimeRulerWidget::paintEvent(QPaintEvent* event)
     painter.setPen(QPen(QColor("#222225"), 1));
     painter.drawLine(0, h - 1, w, h - 1);
     
+    // Draw loop region
+    if (m_engine && m_engine->getLoopEnd() > m_engine->getLoopStart()) {
+        int loopStartX = m_engine->getLoopStart() * m_pixelsPerSecond;
+        int loopEndX = m_engine->getLoopEnd() * m_pixelsPerSecond;
+        
+        painter.fillRect(loopStartX, 0, loopEndX - loopStartX, h, QColor(51, 119, 255, 60));
+        
+        painter.setPen(QPen(QColor("#3377ff"), 1));
+        painter.drawLine(loopStartX, 0, loopStartX, h);
+        painter.drawLine(loopEndX, 0, loopEndX, h);
+        
+        QPolygon startPoly;
+        startPoly << QPoint(loopStartX, 0) << QPoint(loopStartX + 6, 0) << QPoint(loopStartX, 6);
+        painter.setBrush(QColor("#3377ff"));
+        painter.drawPolygon(startPoly);
+        
+        QPolygon endPoly;
+        endPoly << QPoint(loopEndX, 0) << QPoint(loopEndX - 6, 0) << QPoint(loopEndX, 6);
+        painter.drawPolygon(endPoly);
+    }
+    
     // Draw Ticks (Optimized to exposed rect)
     QRect exposed = event->rect();
     int startX = exposed.left();
@@ -99,14 +120,72 @@ void TimeRulerWidget::setPlayheadFromMouse(QMouseEvent* event)
 void TimeRulerWidget::mousePressEvent(QMouseEvent* event)
 {
     if (event->button() == Qt::LeftButton) {
-        setPlayheadFromMouse(event);
+        int absoluteX = event->position().x();
+        double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
+        m_selectionAnchorTime = timeSecs;
+        m_isSelectingTime = true;
+        
+        if (m_engine) {
+            // Do not clear the selection, just set the playhead
+            m_engine->setPlayheadPosition(timeSecs);
+        }
+        update();
     }
 }
 
 void TimeRulerWidget::mouseMoveEvent(QMouseEvent* event)
 {
-    if (event->buttons() & Qt::LeftButton) {
-        setPlayheadFromMouse(event);
+    if (m_isSelectingTime && (event->buttons() & Qt::LeftButton)) {
+        int absoluteX = event->position().x();
+        double timeSecs = std::max(0.0, (double)absoluteX / m_pixelsPerSecond);
+        
+        double start = std::min(m_selectionAnchorTime, timeSecs);
+        double end = std::max(m_selectionAnchorTime, timeSecs);
+        
+        if (m_engine) {
+            m_engine->setLoopRegion(start, end);
+            m_engine->setPlayheadPosition(timeSecs);
+            if (end > start + 0.01) {
+                m_engine->setLooping(true);
+            }
+        }
+        update();
+        emit timeSelectionChanged(start, end);
+    }
+}
+
+void TimeRulerWidget::mouseReleaseEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton) {
+        m_isSelectingTime = false;
+        if (m_engine && m_engine->getLoopEnd() > m_engine->getLoopStart() + 0.01) {
+            m_engine->setPlayheadPosition(m_engine->getLoopStart());
+        }
+        update();
+    }
+}
+
+void TimeRulerWidget::mouseDoubleClickEvent(QMouseEvent* event)
+{
+    if (event->button() == Qt::LeftButton && m_engine) {
+        if (m_engine->getLoopEnd() > m_engine->getLoopStart() + 0.01) {
+            m_engine->setLoopRegion(0, 0);
+            m_engine->setLooping(false);
+        } else {
+            double maxEndTime = 0.0;
+            auto tracks = m_engine->getTracksSnapshot();
+            for (const auto& track : tracks) {
+                for (const auto& item : track.items) {
+                    double end = item.startTimeSecs + item.durationSecs;
+                    if (end > maxEndTime) maxEndTime = end;
+                }
+            }
+            if (maxEndTime > 0) {
+                m_engine->setLoopRegion(0, maxEndTime);
+                m_engine->setLooping(true);
+            }
+        }
+        update();
     }
 }
 
@@ -130,6 +209,12 @@ TimelineLanesWidget::TimelineLanesWidget(dsp::AudioEngine* engine, QWidget* pare
 void TimelineLanesWidget::setZoom(double pixelsPerSecond)
 {
     m_pixelsPerSecond = pixelsPerSecond;
+    update();
+}
+
+void TimelineLanesWidget::setTrackHeight(int height)
+{
+    m_trackHeight = height;
     update();
 }
 
@@ -181,7 +266,7 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
         auto tracks = m_engine->getTracksSnapshot();
         
         // Dynamically set height if tracks exist
-        int expectedHeight = tracks.size() * 104; // 100px TrackCard + 4px margin
+        int expectedHeight = tracks.size() * (m_trackHeight + 4); // TrackCard + 4px margin
         if (expectedHeight > 0 && expectedHeight != minimumHeight()) {
             setMinimumHeight(expectedHeight);
         }
@@ -189,7 +274,7 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
         painter.setPen(QPen(QColor("#222225"), 1));
         
         int yOffset = 0;
-        int trackHeight = 100;
+        int trackHeight = m_trackHeight;
         int trackMargin = 4;
         
         for (size_t i = 0; i < tracks.size(); ++i) {
@@ -385,6 +470,18 @@ void TimelineLanesWidget::paintEvent(QPaintEvent* event)
         }
     }
     
+    // Draw loop region overlay
+    if (m_engine && m_engine->getLoopEnd() > m_engine->getLoopStart()) {
+        int loopStartX = m_engine->getLoopStart() * m_pixelsPerSecond;
+        int loopEndX = m_engine->getLoopEnd() * m_pixelsPerSecond;
+        
+        painter.fillRect(loopStartX, 0, loopEndX - loopStartX, h, QColor(255, 255, 255, 10)); // faint white/blue highlight
+        
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1, Qt::DashLine));
+        painter.drawLine(loopStartX, 0, loopStartX, h);
+        painter.drawLine(loopEndX, 0, loopEndX, h);
+    }
+    
     // Draw Playhead (Nothing Red)
     if (m_engine) {
         double playheadTime = m_engine->getPlayheadTime();
@@ -418,7 +515,7 @@ HitTestResult TimelineLanesWidget::hitTest(const QPoint& pos)
     if (!m_engine) return result;
     
     auto tracks = m_engine->getTracksSnapshot();
-    int trackHeight = 100;
+    int trackHeight = m_trackHeight;
     int trackMargin = 4;
     int yOffset = 0;
     
@@ -492,7 +589,7 @@ void TimelineLanesWidget::mouseMoveEvent(QMouseEvent* event)
             m_previewStartTime = std::max(0.0, newStartX / m_pixelsPerSecond);
             
             // Determine new track
-            int trackHeight = 100;
+            int trackHeight = m_trackHeight;
             int trackMargin = 4;
             int newTrackIndex = event->y() / (trackHeight + trackMargin);
             if (m_engine) {
@@ -696,7 +793,7 @@ void TimelineLanesWidget::dragMoveEvent(QDragMoveEvent* event)
 {
     if (event->mimeData()->hasUrls() && m_engine) {
         // Calculate drop target track and time
-        int trackHeight = 100;
+        int trackHeight = m_trackHeight;
         int trackMargin = 4;
         int trackIndex = event->pos().y() / (trackHeight + trackMargin);
         
@@ -824,6 +921,11 @@ void TimelineContainer::wheelEvent(QWheelEvent* event)
         // Zoom
         double factor = (event->angleDelta().y() > 0) ? 1.2 : 1.0 / 1.2;
         zoom(factor, event->position().toPoint());
+        event->accept();
+    } else if (event->modifiers() & Qt::ShiftModifier) {
+        // Horizontal scroll
+        QScrollBar* hBar = horizontalScrollBar();
+        hBar->setValue(hBar->value() - event->angleDelta().y());
         event->accept();
     } else {
         // Normal scrolling

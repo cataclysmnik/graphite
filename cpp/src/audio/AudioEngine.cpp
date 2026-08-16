@@ -316,7 +316,17 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         if (sr > 0.0) {
             double timeIncrement = (double)numSamples / sr;
             double currentTime = playheadTimeSeconds.load();
-            playheadTimeSeconds.store(currentTime + timeIncrement);
+            double nextTime = currentTime + timeIncrement;
+            
+            if (m_isLooping.load() && m_loopEndSecs.load() > m_loopStartSecs.load()) {
+                double lEnd = m_loopEndSecs.load();
+                double lStart = m_loopStartSecs.load();
+                if (nextTime >= lEnd && currentTime < lEnd) {
+                    nextTime = lStart + (nextTime - lEnd);
+                }
+            }
+            
+            playheadTimeSeconds.store(nextTime);
         }
     }
 }

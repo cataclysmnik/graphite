@@ -195,7 +195,7 @@ void MainWindow::setupUi()
     const char* trackNames[] = {"Lead Guitar", "Rhythm Guitar", "Bass", "Drums"};
     for (int i = 0; i < 4; ++i) {
         QListWidgetItem* item = new QListWidgetItem(tcpList);
-        item->setSizeHint(QSize(0, 100)); // TrackCard height
+        item->setSizeHint(QSize(0, m_trackHeight)); // TrackCard height
         
         TrackCard* card = new TrackCard(i, trackNames[i], m_engine, tcpList);
         tcpList->setItemWidget(item, card);
@@ -248,20 +248,19 @@ void MainWindow::setupUi()
             if (m_isRecording) {
                 m_isRecording = false;
                 m_engine->setRecording(false);
-                m_btnRecord->setStyleSheet("color: #ff3333; font-size: 14px;");
+                m_btnRecord->setStyleSheet("color: #ff3333; background-color: transparent; font-size: 14px;");
             }
         }
     });
-    
     m_btnRecord = new QPushButton(QChar(0x25CF), this); // Record circle
     m_btnRecord->setFixedSize(32, 24);
     m_btnRecord->setStyleSheet("color: #ff3333; font-size: 14px;");
     m_btnRecord->setFocusPolicy(Qt::NoFocus);
     connect(m_btnRecord, &QPushButton::clicked, this, &MainWindow::toggleRecording);
 
-    transportLayout->addWidget(m_btnRecord);
     transportLayout->addWidget(m_btnPlayPause);
     transportLayout->addWidget(btnStop);
+    transportLayout->addWidget(m_btnRecord);
     transportLayout->addStretch();
     timelineLayout->addLayout(transportLayout);
     
@@ -308,6 +307,10 @@ void MainWindow::setupUi()
     m_timeline = new TimelineContainer(m_engine, timelinePanel);
     m_timeline->setObjectName("TimelineContainer");
     timelineLayout->addWidget(m_timeline);
+    
+    // Install event filters for Ctrl+Wheel track zoom
+    tcpList->viewport()->installEventFilter(this);
+    m_timeline->viewport()->installEventFilter(this);
     
     // Synchronize vertical scrolling between TCP and Timeline
     connect(tcpList->verticalScrollBar(), &QScrollBar::valueChanged,
@@ -546,6 +549,43 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
     return QMainWindow::nativeEvent(eventType, message, result);
 }
 #endif
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (event->type() == QEvent::Wheel) {
+        QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
+        if (wheelEvent->modifiers() & Qt::ControlModifier) {
+            // Track height zoom
+            int delta = wheelEvent->angleDelta().y();
+            if (delta > 0) {
+                m_trackHeight += 10;
+                if (m_trackHeight > 400) m_trackHeight = 400;
+            } else if (delta < 0) {
+                m_trackHeight -= 10;
+                if (m_trackHeight < 30) m_trackHeight = 30;
+            }
+            
+            // Apply to TCP
+            QListWidget* tcpList = findChild<QListWidget*>("TcpListWidget");
+            if (tcpList) {
+                for (int i = 0; i < tcpList->count(); ++i) {
+                    tcpList->item(i)->setSizeHint(QSize(0, m_trackHeight));
+                }
+            }
+            
+            // Apply to Timeline
+            if (m_timeline) {
+                TimelineLanesWidget* lanes = m_timeline->findChild<TimelineLanesWidget*>();
+                if (lanes) {
+                    lanes->setTrackHeight(m_trackHeight);
+                }
+            }
+            
+            return true; // handled
+        }
+    }
+    return QMainWindow::eventFilter(obj, event);
+}
 
 void MainWindow::selectTrack(int index)
 {
@@ -952,7 +992,7 @@ void MainWindow::rebuildTrackUI()
         
         for (size_t i = 0; i < tracks.size(); ++i) {
             QListWidgetItem* item = new QListWidgetItem(tcpList);
-            item->setSizeHint(QSize(0, 100)); // TrackCard height
+            item->setSizeHint(QSize(0, m_trackHeight)); // TrackCard height
             
             TrackCard* card = new TrackCard(tracks[i].id, QString::fromStdString(tracks[i].name), m_engine, tcpList);
             
@@ -995,6 +1035,7 @@ void MainWindow::rebuildTrackUI()
 void MainWindow::checkProjectDirty()
 {
     if (!m_engine) return;
+    
     bool isDirty = m_engine->isProjectDirty();
     if (isDirty != m_lastKnownDirty) {
         m_lastKnownDirty = isDirty;

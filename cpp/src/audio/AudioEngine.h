@@ -52,6 +52,17 @@ public:
     bool isEngineRecording() const { return isRecording.load(); }
     double getPlayheadTime() const { return playheadTimeSeconds.load(); }
     
+    // Looping state
+    bool isLoopingEnabled() const { return m_isLooping.load(); }
+    void setLooping(bool shouldLoop) { m_isLooping.store(shouldLoop); }
+    double getLoopStart() const { return m_loopStartSecs.load(); }
+    double getLoopEnd() const { return m_loopEndSecs.load(); }
+    void setLoopRegion(double start, double end) {
+        if (start > end) std::swap(start, end);
+        m_loopStartSecs.store(start);
+        m_loopEndSecs.store(end);
+    }
+    
     // Project dirty state tracking
     bool isProjectDirty() const { return m_isProjectDirty.load(); }
     void markProjectDirty() { m_isProjectDirty = true; }
@@ -100,6 +111,11 @@ private:
     std::atomic<bool> isRecording { false };
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> playheadTimeSeconds { 0.0 };
+    
+    std::atomic<bool> m_isLooping { false };
+    std::atomic<double> m_loopStartSecs { 0.0 };
+    std::atomic<double> m_loopEndSecs { 0.0 };
+    
     std::atomic<int> selectedTrackIndex { 0 };
     std::atomic<bool> m_isProjectDirty { false };
     std::atomic<int> m_nextItemId{1000};
