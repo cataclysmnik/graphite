@@ -28,7 +28,7 @@
 #include <QButtonGroup>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QMessageBox>
+#include "CustomMessageBox.h"
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QShortcut>
@@ -66,6 +66,9 @@ MainWindow::MainWindow(dsp::AudioEngine* engine, juce::AudioDeviceManager* devic
 
     // After layout is setup, force Windows DWM to dark mode
     enforceDarkImmersiveMode();
+
+    connect(&m_dirtyCheckTimer, &QTimer::timeout, this, &MainWindow::checkProjectDirty);
+    m_dirtyCheckTimer.start(500); // Check dirty state every 500ms
 }
 
 MainWindow::~MainWindow()
@@ -684,6 +687,8 @@ void MainWindow::zoomOut()
 
 void MainWindow::newProject()
 {
+    if (!promptSaveIfDirty()) return;
+    
     if (!m_engine) return;
     m_engine->clearProject();
     m_currentProjectPath.clear();
@@ -693,6 +698,8 @@ void MainWindow::newProject()
 
 void MainWindow::openProject()
 {
+    if (!promptSaveIfDirty()) return;
+
     QString fileName = QFileDialog::getOpenFileName(this, "Open Project", "", "Graphite Projects (*.graphite)");
     if (fileName.isEmpty()) return;
     
@@ -704,7 +711,7 @@ void MainWindow::openProject()
     juce::String xmlString = file.loadFileAsString();
     std::unique_ptr<juce::XmlElement> xml = juce::XmlDocument::parse(xmlString);
     if (xml == nullptr) {
-        QMessageBox::critical(this, "Error", "Failed to parse project file.");
+        CustomMessageBox::critical(this, "Error", "Failed to parse project file.");
         return;
     }
 
@@ -735,14 +742,13 @@ void MainWindow::openProject()
     rebuildTrackUI();
 }
 
-void MainWindow::saveProject()
+bool MainWindow::saveProject()
 {
     if (m_currentProjectPath.isEmpty()) {
-        saveProjectAs();
-        return;
+        return saveProjectAs();
     }
     
-    if (!m_engine) return;
+    if (!m_engine) return false;
     
     juce::ValueTree tree = m_engine->serializeProjectState();
     std::unique_ptr<juce::XmlElement> xml(tree.createXml());
@@ -750,17 +756,22 @@ void MainWindow::saveProject()
         juce::String xmlString = xml->createDocument(juce::String());
         juce::File file(m_currentProjectPath.toStdString());
         file.replaceWithText(xmlString);
+        
+        m_engine->clearProjectDirty();
+        checkProjectDirty(); // update title immediately
+        return true;
     }
+    return false;
 }
 
-void MainWindow::saveProjectAs()
+bool MainWindow::saveProjectAs()
 {
     QString fileName = QFileDialog::getSaveFileName(this, "Save Project As", "", "Graphite Projects (*.graphite)");
-    if (fileName.isEmpty()) return;
+    if (fileName.isEmpty()) return false;
     
     m_currentProjectPath = fileName;
     m_titleBar->setProjectName(QFileInfo(fileName).baseName());
-    saveProject();
+    return saveProject();
 }
 
 void MainWindow::rebuildTrackUI()
@@ -805,6 +816,48 @@ void MainWindow::rebuildTrackUI()
     }
     
     selectTrack(0);
+}
+
+void MainWindow::checkProjectDirty()
+{
+    if (!m_engine) return;
+    bool isDirty = m_engine->isProjectDirty();
+    if (isDirty != m_lastKnownDirty) {
+        m_lastKnownDirty = isDirty;
+        
+        QString baseName = m_currentProjectPath.isEmpty() ? "" : QFileInfo(m_currentProjectPath).baseName();
+        if (isDirty) {
+            m_titleBar->setProjectName(baseName.isEmpty() ? "Unsaved Project*" : baseName + "*");
+        } else {
+            m_titleBar->setProjectName(baseName);
+        }
+    }
+}
+
+bool MainWindow::promptSaveIfDirty()
+{
+    if (m_engine && m_engine->isProjectDirty()) {
+        QMessageBox::StandardButton reply;
+        reply = CustomMessageBox::question(this, "Unsaved Changes",
+            "The current project has unsaved changes. Do you want to save them?",
+            QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
+            
+        if (reply == QMessageBox::Yes) {
+            return saveProject(); 
+        } else if (reply == QMessageBox::Cancel) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (promptSaveIfDirty()) {
+        event->accept();
+    } else {
+        event->ignore();
+    }
 }
 
 } // namespace gui

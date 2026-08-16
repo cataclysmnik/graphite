@@ -68,6 +68,7 @@ add_executable(GuitarDAW_CPP
     src/gui/MixerStrip.cpp
     src/gui/MixerPanel.cpp
     src/gui/EffectsRack.cpp
+    src/gui/CustomMessageBox.cpp
     src/gui/SignalFlow.cpp
     src/gui/CustomKnob.cpp
     src/gui/LevelMeter.cpp

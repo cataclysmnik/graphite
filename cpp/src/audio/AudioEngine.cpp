@@ -493,6 +493,7 @@ void AudioEngine::processMessages()
                             if (track.isArmed && track.id >= 0 && track.id < m_recordBuffers.size()) {
                                 int written = m_recordSamplesWritten[track.id];
                                 if (written > 0) {
+                                    markProjectDirty();
                                     auto newBuf = std::make_shared<juce::AudioBuffer<float>>(2, written);
                                     newBuf->copyFrom(0, 0, *m_recordBuffers[track.id], 0, 0, written);
                                     newBuf->copyFrom(1, 0, *m_recordBuffers[track.id], 1, 0, written);
@@ -515,26 +516,31 @@ void AudioEngine::processMessages()
                 case EngineCommandType::SetTrackVolume:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].volume = msg.floatValue;
+                        markProjectDirty();
                     }
                     break;
                 case EngineCommandType::SetTrackPan:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].pan = msg.floatValue;
+                        markProjectDirty();
                     }
                     break;
                 case EngineCommandType::SetTrackMute:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].isMuted = msg.boolValue;
+                        markProjectDirty();
                     }
                     break;
                 case EngineCommandType::SetTrackSolo:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].isSolo = msg.boolValue;
+                        markProjectDirty();
                     }
                     break;
                 case EngineCommandType::SetTrackArm:
                     if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         tracks[msg.trackIndex].isArmed = msg.boolValue;
+                        markProjectDirty();
                     }
                     break;
                 case EngineCommandType::AddTrack: {
@@ -543,6 +549,7 @@ void AudioEngine::processMessages()
                     t.id = tracks.size();
                     t.name = msg.stringValue[0] != '\0' ? msg.stringValue : "New Track";
                     tracks.push_back(std::move(t));
+                    markProjectDirty();
                     break;
                 }
                 case EngineCommandType::MoveTrack: {
@@ -558,6 +565,7 @@ void AudioEngine::processMessages()
                         for (size_t i = 0; i < tracks.size(); ++i) {
                             tracks[i].id = (int)i;
                         }
+                        markProjectDirty();
                     }
                     break;
                 }
@@ -575,6 +583,7 @@ void AudioEngine::processMessages()
                                                  [&msg](const AudioItem& item) { return item.id == msg.itemId; });
                         if (it != track.items.end()) {
                             track.items.erase(it, track.items.end());
+                            markProjectDirty();
                             break;
                         }
                     }
@@ -599,6 +608,7 @@ void AudioEngine::processMessages()
                     if (found && msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                         movedItem.startTimeSecs = msg.doubleValue;
                         tracks[msg.trackIndex].items.push_back(movedItem);
+                        markProjectDirty();
                     }
                     break;
                 }
@@ -628,6 +638,7 @@ void AudioEngine::processMessages()
                         if (msg.trackIndex >= 0 && msg.trackIndex < tracks.size()) {
                             std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
                             tracks[msg.trackIndex].items.push_back(*item);
+                            markProjectDirty();
                         }
                         delete item; // We copied it into the vector, so clean up the heap allocation
                     }
@@ -743,6 +754,7 @@ void AudioEngine::loadPluginSynchronous(int trackIndex, const juce::String& iden
     if (newPlugin != nullptr) {
         std::lock_guard<std::recursive_mutex> lock(m_pluginMutex);
         tracks[trackIndex].plugins.push_back(std::move(newPlugin));
+        markProjectDirty();
     }
 }
 
@@ -760,6 +772,7 @@ void AudioEngine::movePluginSynchronous(int trackIndex, int fromIndex, int toInd
     auto item = std::move(plugins[fromIndex]);
     plugins.erase(plugins.begin() + fromIndex);
     plugins.insert(plugins.begin() + toIndex, std::move(item));
+    markProjectDirty();
 }
 
 void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
@@ -777,6 +790,7 @@ void AudioEngine::deletePluginSynchronous(int trackIndex, int pluginIndex)
     
     if (pluginIndex >= 0 && pluginIndex < plugins.size()) {
         plugins.erase(plugins.begin() + pluginIndex);
+        markProjectDirty();
     }
 }
 
@@ -805,6 +819,7 @@ void AudioEngine::moveTrackSynchronous(int fromIndex, int toIndex)
         } else if (fromIndex > selected && toIndex <= selected) {
             selectedTrackIndex.store(selected + 1);
         }
+        markProjectDirty();
     }
 }
 

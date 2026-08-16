@@ -7,6 +7,7 @@
 #include <vector>
 #include <QPushButton>
 #include <QButtonGroup>
+#include <QTimer>
 #include <QCloseEvent>
 
 namespace dsp {
@@ -53,20 +54,17 @@ private slots:
     // Project management slots
     void newProject();
     void openProject();
-    void saveProject();
-    void saveProjectAs();
+    bool saveProject();
+    bool saveProjectAs();
     
     void rebuildTrackUI();
-    void markDirty();       // Call whenever the project is modified
 
 private:
-    // Returns true if it is safe to proceed (user saved or discarded).
-    // Shows a "Save changes?" dialog if m_isDirty is true.
-    bool confirmSaveIfDirty();
-    void updateTitleBar();  // Refreshes title bar with project name + dirty indicator
     void setupUi();
     void setupMenus();
     void enforceDarkImmersiveMode();
+    bool promptSaveIfDirty(); // Returns true if it's safe to proceed (saved, discarded, or not dirty)
+    void checkProjectDirty(); // Timer callback
 
     dsp::AudioEngine* m_engine;
     juce::AudioDeviceManager* m_deviceManager;
@@ -94,9 +92,11 @@ private:
     bool m_isPlaying = false;
     
     QString m_currentProjectPath;
-    bool m_isDirty = false;
     
     ArmMode m_armMode = ArmMode::Standard;
+    
+    QTimer m_dirtyCheckTimer;
+    bool m_lastKnownDirty = false;
 };
 
 } // namespace gui

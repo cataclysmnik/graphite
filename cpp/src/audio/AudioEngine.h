@@ -52,6 +52,11 @@ public:
     bool isEngineRecording() const { return isRecording.load(); }
     double getPlayheadTime() const { return playheadTimeSeconds.load(); }
     
+    // Project dirty state tracking
+    bool isProjectDirty() const { return m_isProjectDirty.load(); }
+    void markProjectDirty() { m_isProjectDirty = true; }
+    void clearProjectDirty() { m_isProjectDirty = false; }
+    
     // Track State Getters (thread safe-ish for UI)
     int getSelectedTrackIndex() const { return selectedTrackIndex.load(); }
     float getTrackPeakL(int trackIndex) const;
@@ -96,6 +101,7 @@ private:
     std::atomic<double> currentSampleRate { 44100.0 };
     std::atomic<double> playheadTimeSeconds { 0.0 };
     std::atomic<int> selectedTrackIndex { 0 };
+    std::atomic<bool> m_isProjectDirty { false };
     
     // Recording buffers
     std::vector<std::unique_ptr<juce::AudioBuffer<float>>> m_recordBuffers;

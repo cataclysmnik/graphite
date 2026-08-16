@@ -8,5 +8,7 @@
     <file alias="icons/fastforward.svg">../public/icons/fastforward.svg</file>
     <file alias="icons/pin.svg">../public/icons/pin.svg</file>
     <file alias="icons/unpin.svg">../public/icons/unpin.svg</file>
+    <file alias="logo.png">../logo.png</file>
+    <file alias="splashscreen.png">../splashscreen.png</file>
 </qresource>
 </RCC>

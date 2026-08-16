@@ -24,7 +24,6 @@ public:
 
 signals:
     void clicked(int index);
-    void modified();  // Emitted on mute/solo/arm/pan changes
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;

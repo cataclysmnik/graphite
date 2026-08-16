@@ -1,7 +1,7 @@
 #include "AudioSettingsDialog.h"
 #include <QFormLayout>
 #include <QHBoxLayout>
-#include <QMessageBox>
+#include "CustomMessageBox.h"
 #include <QGroupBox>
 
 namespace gui {
@@ -422,7 +422,7 @@ void AudioSettingsDialog::onAsioConfigClicked()
         if (device->hasControlPanel()) {
             device->showControlPanel();
         } else {
-            QMessageBox::information(this, "ASIO Configuration", "This device does not have a control panel.");
+            CustomMessageBox::information(this, "ASIO Configuration", "This device does not have a control panel.");
         }
     }
 }
@@ -476,7 +476,7 @@ void AudioSettingsDialog::onApplyClicked()
     juce::String err = m_deviceManager.setAudioDeviceSetup(setup, true);
     
     if (err.isNotEmpty()) {
-        QMessageBox::critical(this, "Audio Error", QString::fromStdString(err.toStdString()));
+        CustomMessageBox::critical(this, "Audio Error", QString::fromStdString(err.toStdString()));
         setResult(QDialog::Rejected);
     } else {
         setResult(QDialog::Accepted);
