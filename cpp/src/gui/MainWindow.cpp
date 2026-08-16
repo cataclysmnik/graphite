@@ -13,6 +13,8 @@
 #include "MixerStrip.h"
 #include "EffectsRack.h"
 #include "SignalFlow.h"
+#include "TunerWidget.h"
+#include "MetronomeWidget.h"
 #include "AudioSettingsDialog.h"
 #include "LoadingPopup.h"
 #include "../audio/AudioEngine.h"
@@ -417,8 +419,25 @@ void MainWindow::setupUi()
     
     effectsLayout->addWidget(effectsSplitter);
     
+    // Utilities Tab (Tuner & Metronome)
+    QWidget* utilitiesTab = new QWidget();
+    QHBoxLayout* utilitiesLayout = new QHBoxLayout(utilitiesTab);
+    utilitiesLayout->setContentsMargins(0, 0, 0, 0);
+    utilitiesLayout->setSpacing(0);
+    
+    QSplitter* utilitiesSplitter = new QSplitter(Qt::Horizontal, utilitiesTab);
+    
+    gui::GuitarTunerWidget* tuner = new gui::GuitarTunerWidget(m_engine, utilitiesSplitter);
+    gui::GuitarMetronomeWidget* metronome = new gui::GuitarMetronomeWidget(m_engine, utilitiesSplitter);
+    
+    utilitiesSplitter->addWidget(tuner);
+    utilitiesSplitter->addWidget(metronome);
+    utilitiesSplitter->setSizes({500, 500});
+    utilitiesLayout->addWidget(utilitiesSplitter);
+    
     m_bottomDock->addTab(effectsTab, "EFFECTS");
     m_bottomDock->addTab(mixerTab, "MIXER");
+    m_bottomDock->addTab(utilitiesTab, "UTILITIES");
 
     m_mainSplitter->addWidget(m_bottomDock);
     m_mainSplitter->setSizes({600, 250});

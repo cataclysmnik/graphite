@@ -69,6 +69,8 @@ add_executable(GuitarDAW_CPP
     src/gui/ExportDialog.h
     src/gui/MixerStrip.cpp
     src/gui/MixerPanel.cpp
+    src/gui/TunerWidget.cpp
+    src/gui/MetronomeWidget.cpp
     src/gui/EffectsRack.cpp
     src/gui/CustomMessageBox.cpp
     src/gui/SignalFlow.cpp

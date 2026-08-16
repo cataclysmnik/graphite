@@ -310,6 +310,79 @@ void AudioEngine::audioDeviceIOCallbackWithContext (
         }
     }
     
+    // Write to Tuner Buffer (Master mix for now, mono-summed)
+    if (numOutputChannels >= 2 && outputChannelData[0] != nullptr && outputChannelData[1] != nullptr) {
+        int idx = m_tunerBufferIndex.load(std::memory_order_relaxed);
+        for (int i = 0; i < samplesToProcess; ++i) {
+            float mixed = (outputChannelData[0][i] + outputChannelData[1][i]) * 0.5f;
+            m_tunerBuffer[idx] = mixed;
+            idx = (idx + 1) % TUNER_BUFFER_SIZE;
+        }
+        m_tunerBufferIndex.store(idx, std::memory_order_relaxed);
+    } else if (numOutputChannels == 1 && outputChannelData[0] != nullptr) {
+        int idx = m_tunerBufferIndex.load(std::memory_order_relaxed);
+        for (int i = 0; i < samplesToProcess; ++i) {
+            m_tunerBuffer[idx] = outputChannelData[0][i];
+            idx = (idx + 1) % TUNER_BUFFER_SIZE;
+        }
+        m_tunerBufferIndex.store(idx, std::memory_order_relaxed);
+    }
+    
+    // Process Metronome
+    if ((engineIsPlaying || isRecording.load()) && m_metronomeEnabled.load() && currentSr > 0.0) {
+        double bpm = m_bpm.load();
+        double samplesPerBeat = (60.0 / bpm) * currentSr;
+        double startSamplePlayhead = currentPlayhead * currentSr;
+        
+        int numNumerator = m_timeSigNumerator.load();
+        if (numNumerator <= 0) numNumerator = 4;
+        float vol = m_metronomeVolume.load();
+        
+        int beepRemaining = m_metronomeBeepSamplesRemaining.load();
+        float phase = m_metronomeBeepPhase.load();
+        float freq = m_metronomeBeepFreq.load();
+        
+        for (int i = 0; i < samplesToProcess; ++i) {
+            double currentSample = startSamplePlayhead + i;
+            
+            double prevSample = currentSample - 1.0;
+            int beatPrev = std::floor(prevSample / samplesPerBeat);
+            int beatCurr = std::floor(currentSample / samplesPerBeat);
+            
+            if (beatCurr > beatPrev && beatCurr >= 0) {
+                // Beat crossed! Trigger beep
+                bool isAccented = (beatCurr % numNumerator == 0);
+                freq = isAccented ? 800.0f : 400.0f;
+                beepRemaining = currentSr * 0.025; // 25ms
+                phase = 0.0f;
+            }
+            
+            if (beepRemaining > 0) {
+                float phaseInc = 2.0f * juce::MathConstants<float>::pi * freq / currentSr;
+                float env = std::pow((float)beepRemaining / (currentSr * 0.025f), 2.0f); // Exponential decay
+                float sine = std::sin(phase);
+                phase += phaseInc;
+                if (phase > 2.0f * juce::MathConstants<float>::pi) {
+                    phase -= 2.0f * juce::MathConstants<float>::pi;
+                }
+                
+                float sample = sine * env * vol;
+                if (numOutputChannels >= 2) {
+                    outputChannelData[0][i] += sample;
+                    outputChannelData[1][i] += sample;
+                } else if (numOutputChannels == 1) {
+                    outputChannelData[0][i] += sample;
+                }
+                
+                beepRemaining--;
+            }
+        }
+        
+        m_metronomeBeepSamplesRemaining.store(beepRemaining);
+        m_metronomeBeepPhase.store(phase);
+        m_metronomeBeepFreq.store(freq);
+    }
+    
     // Update playhead time if playing
     if (isPlaying.load()) {
         double sr = currentSampleRate.load();
@@ -1399,6 +1472,22 @@ bool AudioEngine::renderOffline(const RenderOptions& options, std::function<bool
     }
     
     return true;
+}
+std::vector<float> AudioEngine::getTunerSamples(int count) const
+{
+    if (count <= 0) return {};
+    count = std::min(count, TUNER_BUFFER_SIZE);
+    std::vector<float> result(count);
+    
+    int currentIdx = m_tunerBufferIndex.load(std::memory_order_relaxed);
+    
+    // Copy backwards from currentIdx
+    for (int i = 0; i < count; ++i) {
+        int readIdx = (currentIdx - 1 - i);
+        if (readIdx < 0) readIdx += TUNER_BUFFER_SIZE;
+        result[count - 1 - i] = m_tunerBuffer[readIdx];
+    }
+    return result;
 }
 
 } // namespace dsp

@@ -113,6 +113,22 @@ public:
     // Track management
     void moveTrackSynchronous(int fromIndex, int toIndex);
     
+    // Metronome & Tuner
+    double getBpm() const { return m_bpm.load(); }
+    void setBpm(double bpm) { m_bpm.store(bpm); }
+    
+    bool isMetronomeEnabled() const { return m_metronomeEnabled.load(); }
+    void setMetronomeEnabled(bool enabled) { m_metronomeEnabled.store(enabled); }
+    
+    float getMetronomeVolume() const { return m_metronomeVolume.load(); }
+    void setMetronomeVolume(float vol) { m_metronomeVolume.store(vol); }
+    
+    int getTimeSigNumerator() const { return m_timeSigNumerator.load(); }
+    void setTimeSigNumerator(int num) { m_timeSigNumerator.store(num); }
+    
+    // Returns the latest samples from the tuner buffer (size up to 4096)
+    std::vector<float> getTunerSamples(int count = 2048) const;
+    
 private:
     void processMessages();
 
@@ -135,6 +151,22 @@ private:
     std::atomic<int> selectedTrackIndex { 0 };
     std::atomic<bool> m_isProjectDirty { false };
     std::atomic<int> m_nextItemId{1000};
+    
+    // Metronome state
+    std::atomic<double> m_bpm { 120.0 };
+    std::atomic<bool> m_metronomeEnabled { false };
+    std::atomic<float> m_metronomeVolume { 0.8f };
+    std::atomic<int> m_timeSigNumerator { 4 };
+    
+    // Metronome Beep State
+    std::atomic<int> m_metronomeBeepSamplesRemaining { 0 };
+    std::atomic<float> m_metronomeBeepPhase { 0.0f };
+    std::atomic<float> m_metronomeBeepFreq { 1000.0f };
+    
+    // Tuner Buffer (circular)
+    static constexpr int TUNER_BUFFER_SIZE = 4096;
+    float m_tunerBuffer[TUNER_BUFFER_SIZE] = {0.0f};
+    std::atomic<int> m_tunerBufferIndex { 0 };
     
     // Recording buffers
     std::vector<std::unique_ptr<juce::AudioBuffer<float>>> m_recordBuffers;
