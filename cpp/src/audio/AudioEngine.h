@@ -43,6 +43,20 @@ public:
     void clearAudioItemSelection();
     void loadAudioFileSynchronous(int trackIndex, double startTimeSecs, const juce::String& filePath);
     
+    struct RenderOptions {
+        juce::String outputPath;
+        double sampleRate { 44100.0 };
+        int bitDepth { 24 };
+        double startTimeSecs { 0.0 };
+        double endTimeSecs { 0.0 };
+        bool renderStems { false }; // If true, render each track to a separate file (stem rendering)
+        int trackIdToRender { -1 }; // If >= 0, only render this specific track. -1 means Master Mix.
+    };
+    
+    // Offline rendering (must not be called on audio thread)
+    // Returns true if successful, false if cancelled or failed
+    bool renderOffline(const RenderOptions& options, std::function<bool(float)> progressCallback);
+    
     // Project state serialization
     juce::ValueTree serializeProjectState(const std::string& projectDirectory = "");
     void deserializeProjectState(const juce::ValueTree& state, std::function<void(float)> progressCallback = nullptr);

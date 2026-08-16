@@ -920,8 +920,8 @@ void AudioEngine::moveTrackSynchronous(int fromIndex, int toIndex)
 
 float AudioEngine::getTrackPeakL(int trackIndex) const
 {
-    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
-    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+    std::unique_lock<std::recursive_mutex> lock(m_trackMutex, std::try_to_lock);
+    if (lock.owns_lock() && trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakL;
     }
     return 0.0f;
@@ -929,8 +929,8 @@ float AudioEngine::getTrackPeakL(int trackIndex) const
 
 float AudioEngine::getTrackPeakR(int trackIndex) const
 {
-    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
-    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+    std::unique_lock<std::recursive_mutex> lock(m_trackMutex, std::try_to_lock);
+    if (lock.owns_lock() && trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].peakR;
     }
     return 0.0f;
@@ -938,8 +938,8 @@ float AudioEngine::getTrackPeakR(int trackIndex) const
 
 float AudioEngine::getTrackPan(int trackIndex) const
 {
-    std::lock_guard<std::recursive_mutex> lock(m_trackMutex);
-    if (trackIndex >= 0 && trackIndex < tracks.size()) {
+    std::unique_lock<std::recursive_mutex> lock(m_trackMutex, std::try_to_lock);
+    if (lock.owns_lock() && trackIndex >= 0 && trackIndex < tracks.size()) {
         return tracks[trackIndex].pan;
     }
     return 0.0f;
@@ -1252,6 +1252,152 @@ void AudioEngine::deserializeProjectState(const juce::ValueTree& state, std::fun
         std::lock_guard<std::recursive_mutex> trackLock(m_trackMutex);
         tracks = std::move(newTracks);
     }
+}
+
+bool AudioEngine::renderOffline(const RenderOptions& options, std::function<bool(float)> progressCallback)
+{
+    std::lock_guard<std::recursive_mutex> tLock(m_trackMutex);
+    std::lock_guard<std::recursive_mutex> pLock(m_pluginMutex);
+    
+    double sampleRate = options.sampleRate;
+    int bitDepth = options.bitDepth;
+    double startTime = options.startTimeSecs;
+    double endTime = options.endTimeSecs;
+    if (endTime <= startTime) return false;
+    
+    double totalDuration = endTime - startTime;
+    int64_t totalSamples = (int64_t)(totalDuration * sampleRate);
+    int64_t processedSamples = 0;
+    constexpr int MAX_BUFFER = 4096;
+    
+    juce::WavAudioFormat wavFormat;
+    
+    // Create master writer
+    juce::File outputFile(options.outputPath);
+    if (outputFile.existsAsFile()) outputFile.deleteFile();
+    
+    std::unique_ptr<juce::AudioFormatWriter> writer(
+        wavFormat.createWriterFor(new juce::FileOutputStream(outputFile), 
+                                  sampleRate, 2, bitDepth, {}, 0));
+                                  
+    if (writer == nullptr) return false;
+    
+    // Prepare plugins for offline render
+    for (auto& track : tracks) {
+        for (auto& plugin : track.plugins) {
+            if (plugin != nullptr) {
+                plugin->setNonRealtime(true);
+                plugin->prepareToPlay(sampleRate, MAX_BUFFER);
+            }
+        }
+    }
+    
+    double currentRenderTime = startTime;
+    
+    while (processedSamples < totalSamples) {
+        int samplesToProcess = (int)std::min((int64_t)MAX_BUFFER, totalSamples - processedSamples);
+        
+        float masterLeft[MAX_BUFFER] = {0.0f};
+        float masterRight[MAX_BUFFER] = {0.0f};
+        float* masterChannels[2] = { masterLeft, masterRight };
+        juce::AudioBuffer<float> masterBuffer(masterChannels, 2, samplesToProcess);
+        
+        // Render each track
+        for (auto& track : tracks) {
+            if (options.trackIdToRender >= 0 && track.id != options.trackIdToRender) continue;
+            if (options.trackIdToRender < 0 && track.isMuted && !track.isSolo) continue;
+            
+            float trackLeft[MAX_BUFFER] = {0.0f};
+            float trackRight[MAX_BUFFER] = {0.0f};
+            float* trackChannels[2] = { trackLeft, trackRight };
+            juce::AudioBuffer<float> trackBuffer(trackChannels, 2, samplesToProcess);
+            
+            double endRenderTime = currentRenderTime + (double)samplesToProcess / sampleRate;
+            
+            // --- Playback Audio Items ---
+            for (const auto& item : track.items) {
+                double itemEnd = item.startTimeSecs + item.durationSecs;
+                
+                if (item.startTimeSecs < endRenderTime && itemEnd > currentRenderTime) {
+                    if (item.buffer != nullptr && item.buffer->getNumSamples() > 0) {
+                        int startSampleInBlock = 0;
+                        int startSampleInClip = 0;
+                        int samplesToCopy = samplesToProcess;
+                        
+                        if (currentRenderTime < item.startTimeSecs) {
+                            startSampleInBlock = (item.startTimeSecs - currentRenderTime) * sampleRate;
+                            samplesToCopy -= startSampleInBlock;
+                        } else {
+                            startSampleInClip = (currentRenderTime - item.startTimeSecs) * sampleRate;
+                        }
+                        
+                        if (endRenderTime > itemEnd) {
+                            int over = (endRenderTime - itemEnd) * sampleRate;
+                            samplesToCopy -= over;
+                        }
+                        
+                        int availableInClip = item.buffer->getNumSamples() - startSampleInClip;
+                        samplesToCopy = std::min(samplesToCopy, availableInClip);
+                        
+                        if (samplesToCopy > 0 && startSampleInBlock >= 0 && startSampleInClip >= 0 && startSampleInBlock + samplesToCopy <= samplesToProcess) {
+                            juce::FloatVectorOperations::add(trackLeft + startSampleInBlock, item.buffer->getReadPointer(0, startSampleInClip), samplesToCopy);
+                            if (item.buffer->getNumChannels() > 1) {
+                                juce::FloatVectorOperations::add(trackRight + startSampleInBlock, item.buffer->getReadPointer(1, startSampleInClip), samplesToCopy);
+                            } else {
+                                juce::FloatVectorOperations::add(trackRight + startSampleInBlock, item.buffer->getReadPointer(0, startSampleInClip), samplesToCopy);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // --- VST3 Plugin Processing ---
+            juce::MidiBuffer midiMessages;
+            for (auto& plugin : track.plugins) {
+                if (plugin != nullptr && !plugin->isSuspended()) {
+                    plugin->processBlock(trackBuffer, midiMessages);
+                }
+            }
+            
+            // Apply track volume and pan
+            float vol = track.volume;
+            float panVal = (track.pan + 1.0f) * 0.5f; 
+            float gainL = vol * cosf(panVal * 1.570796f); 
+            float gainR = vol * sinf(panVal * 1.570796f);
+            
+            juce::FloatVectorOperations::multiply(trackLeft, gainL, samplesToProcess);
+            juce::FloatVectorOperations::multiply(trackRight, gainR, samplesToProcess);
+            
+            // Sum into master output
+            juce::FloatVectorOperations::add(masterLeft, trackLeft, samplesToProcess);
+            juce::FloatVectorOperations::add(masterRight, trackRight, samplesToProcess);
+        }
+        
+        // Write master mix to file
+        writer->writeFromAudioSampleBuffer(masterBuffer, 0, samplesToProcess);
+        
+        processedSamples += samplesToProcess;
+        currentRenderTime += (double)samplesToProcess / sampleRate;
+        
+        if (progressCallback) {
+            float progress = (float)processedSamples / (float)totalSamples;
+            if (!progressCallback(progress)) {
+                break; // user cancelled
+            }
+        }
+    }
+    
+    // Restore plugins to real-time mode
+    for (auto& track : tracks) {
+        for (auto& plugin : track.plugins) {
+            if (plugin != nullptr) {
+                plugin->setNonRealtime(false);
+                plugin->prepareToPlay(currentSampleRate.load(), MAX_BUFFER);
+            }
+        }
+    }
+    
+    return true;
 }
 
 } // namespace dsp

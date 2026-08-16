@@ -58,6 +58,7 @@ private slots:
     void openProject(const QString& fileName, bool isTemplate = false);
     bool saveProject();
     bool saveProjectAs();
+    void exportProject();
     
     void rebuildTrackUI();
     

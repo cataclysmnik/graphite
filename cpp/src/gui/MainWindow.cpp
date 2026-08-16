@@ -2,6 +2,12 @@
 #include "CustomTitleBar.h"
 #include "TrackCard.h"
 #include "Timeline.h"
+#include "ExportDialog.h"
+#include <QProgressDialog>
+#include <future>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QFileInfo>
 #include "AudioSettingsDialog.h"
 #include "MixerPanel.h"
 #include "MixerStrip.h"
@@ -33,6 +39,7 @@
 #include <QKeyEvent>
 #include <QShortcut>
 #include <QSettings>
+#include <QThread>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -444,6 +451,11 @@ void MainWindow::setupMenus()
     QAction* saveAsAction = fileMenu->addAction("Save Project As...");
     saveAsAction->setShortcut(QKeySequence::SaveAs);
     connect(saveAsAction, &QAction::triggered, this, &MainWindow::saveProjectAs);
+
+    fileMenu->addSeparator();
+
+    QAction* exportAction = fileMenu->addAction("Export Audio...");
+    connect(exportAction, &QAction::triggered, this, &MainWindow::exportProject);
 
     fileMenu->addSeparator();
 
@@ -976,6 +988,64 @@ bool MainWindow::saveProjectAs()
     m_currentProjectPath = fileName;
     m_titleBar->setProjectName(QFileInfo(fileName).baseName());
     return saveProject();
+}
+
+void MainWindow::exportProject()
+{
+    ExportDialog dlg(m_engine, this);
+    if (dlg.exec() == QDialog::Accepted) {
+        dsp::AudioEngine::RenderOptions options = dlg.getRenderOptions();
+        
+        QProgressDialog progress("Rendering Audio...", "Cancel", 0, 100, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(0);
+        
+        std::atomic<float> currentProgress { 0.0f };
+        std::atomic<bool> isCancelled { false };
+        std::atomic<bool> isFinished { false };
+        std::atomic<bool> isSuccess { false };
+        
+        auto renderThread = std::thread([&]() {
+            isSuccess = m_engine->renderOffline(options, [&](float p) {
+                currentProgress = p;
+                return !isCancelled;
+            });
+            isFinished = true;
+        });
+        
+        while (!isFinished) {
+            QCoreApplication::processEvents();
+            if (progress.wasCanceled()) {
+                isCancelled = true;
+            }
+            progress.setValue(currentProgress * 100);
+            QThread::msleep(20);
+        }
+        
+        renderThread.join();
+        progress.setValue(100);
+        
+        if (!isCancelled) {
+            if (isSuccess) {
+                QMessageBox msgBox(this);
+                msgBox.setWindowTitle("Export Complete");
+                msgBox.setText("Successfully exported to:\n" + QString::fromStdString(options.outputPath.toStdString()));
+                msgBox.setIcon(QMessageBox::Information);
+                
+                QPushButton* okBtn = msgBox.addButton(QMessageBox::Ok);
+                QPushButton* openFolderBtn = msgBox.addButton("Open Folder", QMessageBox::ActionRole);
+                
+                msgBox.exec();
+                
+                if (msgBox.clickedButton() == openFolderBtn) {
+                    QFileInfo fileInfo(QString::fromStdString(options.outputPath.toStdString()));
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(fileInfo.absolutePath()));
+                }
+            } else {
+                QMessageBox::critical(this, "Export Failed", "An error occurred during export.");
+            }
+        }
+    }
 }
 
 void MainWindow::rebuildTrackUI()

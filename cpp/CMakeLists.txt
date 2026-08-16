@@ -65,6 +65,8 @@ add_executable(GuitarDAW_CPP
     src/gui/MainWindow.cpp
     src/gui/TrackCard.cpp
     src/gui/Timeline.cpp
+    src/gui/ExportDialog.cpp
+    src/gui/ExportDialog.h
     src/gui/MixerStrip.cpp
     src/gui/MixerPanel.cpp
     src/gui/EffectsRack.cpp
