@@ -54,6 +54,7 @@ private slots:
     // Project management slots
     void newProject();
     void openProject();
+    void openProject(const QString& fileName, bool isTemplate = false);
     bool saveProject();
     bool saveProjectAs();
     

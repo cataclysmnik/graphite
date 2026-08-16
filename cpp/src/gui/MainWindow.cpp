@@ -32,6 +32,7 @@
 #include <QScrollBar>
 #include <QKeyEvent>
 #include <QShortcut>
+#include <QSettings>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -69,6 +70,26 @@ MainWindow::MainWindow(dsp::AudioEngine* engine, juce::AudioDeviceManager* devic
 
     connect(&m_dirtyCheckTimer, &QTimer::timeout, this, &MainWindow::checkProjectDirty);
     m_dirtyCheckTimer.start(500); // Check dirty state every 500ms
+
+    // Auto-load project if setting is enabled
+    QSettings settings("Graphite Studio", "Graphite DAW");
+    int startupAction = settings.value("StartupAction", 0).toInt();
+    
+    if (startupAction == 1) { // Load Last Project
+        QString lastProject = settings.value("LastProjectPath", "").toString();
+        if (!lastProject.isEmpty() && juce::File(lastProject.toStdString()).existsAsFile()) {
+            QTimer::singleShot(0, this, [this, lastProject]() {
+                openProject(lastProject);
+            });
+        }
+    } else if (startupAction == 2) { // Load Template
+        QString templatePath = settings.value("TemplatePath", "").toString();
+        if (!templatePath.isEmpty() && juce::File(templatePath.toStdString()).existsAsFile()) {
+            QTimer::singleShot(0, this, [this, templatePath]() {
+                openProject(templatePath, true);
+            });
+        }
+    }
 }
 
 MainWindow::~MainWindow()
@@ -384,7 +405,7 @@ void MainWindow::setupMenus()
 
     QAction* openAction = fileMenu->addAction("Open Project...");
     openAction->setShortcut(QKeySequence::Open);
-    connect(openAction, &QAction::triggered, this, &MainWindow::openProject);
+    connect(openAction, &QAction::triggered, this, [this]() { openProject(); });
 
     QAction* saveAction = fileMenu->addAction("Save Project");
     saveAction->setShortcut(QKeySequence::Save);
@@ -703,6 +724,11 @@ void MainWindow::openProject()
     QString fileName = QFileDialog::getOpenFileName(this, "Open Project", "", "Graphite Projects (*.graphite)");
     if (fileName.isEmpty()) return;
     
+    openProject(fileName);
+}
+
+void MainWindow::openProject(const QString& fileName, bool isTemplate)
+{
     if (!m_engine) return;
     
     juce::File file(fileName.toStdString());
@@ -736,9 +762,18 @@ void MainWindow::openProject()
         m_deviceManager->addAudioCallback(m_engine);
 
     loadingPopup.close();
-    m_currentProjectPath = fileName;
-    // Show the project name (file name without extension) in title bar
-    m_titleBar->setProjectName(QFileInfo(fileName).baseName());
+    
+    if (!isTemplate) {
+        m_currentProjectPath = fileName;
+        m_titleBar->setProjectName(QFileInfo(fileName).baseName());
+        
+        QSettings settings("Graphite Studio", "Graphite DAW");
+        settings.setValue("LastProjectPath", fileName);
+    } else {
+        m_currentProjectPath = "";
+        m_titleBar->setProjectName("Unsaved Project (Template)");
+    }
+    
     rebuildTrackUI();
 }
 
@@ -759,6 +794,10 @@ bool MainWindow::saveProject()
         
         m_engine->clearProjectDirty();
         checkProjectDirty(); // update title immediately
+        
+        QSettings settings("Graphite Studio", "Graphite DAW");
+        settings.setValue("LastProjectPath", m_currentProjectPath);
+        
         return true;
     }
     return false;

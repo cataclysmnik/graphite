@@ -55,6 +55,11 @@ private:
     
     QComboBox* m_threadPriorityCombo;
     QCheckBox* m_allowOverrideSampleRateCheck;
+    
+    QComboBox* m_startupActionCombo;
+    QWidget* m_templateContainer;
+    QLineEdit* m_templatePathEdit;
+    QPushButton* m_templateBrowseBtn;
 
     QPushButton* m_okBtn;
     QPushButton* m_cancelBtn;

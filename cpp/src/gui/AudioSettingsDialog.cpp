@@ -3,6 +3,8 @@
 #include <QHBoxLayout>
 #include "CustomMessageBox.h"
 #include <QGroupBox>
+#include <QSettings>
+#include <QFileDialog>
 
 namespace gui {
 
@@ -140,6 +142,51 @@ AudioSettingsDialog::AudioSettingsDialog(juce::AudioDeviceManager& deviceManager
     m_allowOverrideSampleRateCheck = new QCheckBox("Allow projects to override device sample rate", this);
     m_allowOverrideSampleRateCheck->setChecked(true);
     mainLayout->addWidget(m_allowOverrideSampleRateCheck);
+
+    // General App Settings
+    QGroupBox* appGroupBox = new QGroupBox("General Application Settings", this);
+    QVBoxLayout* appGroupLayout = new QVBoxLayout(appGroupBox);
+    
+    QHBoxLayout* startupLayout = new QHBoxLayout();
+    startupLayout->addWidget(new QLabel("Startup Action:", this));
+    m_startupActionCombo = new QComboBox(this);
+    m_startupActionCombo->addItem("Empty Project", 0);
+    m_startupActionCombo->addItem("Load Last Project", 1);
+    m_startupActionCombo->addItem("Load Template", 2);
+    startupLayout->addWidget(m_startupActionCombo, 1);
+    appGroupLayout->addLayout(startupLayout);
+    
+    m_templateContainer = new QWidget(this);
+    QHBoxLayout* templateLayout = new QHBoxLayout(m_templateContainer);
+    templateLayout->setContentsMargins(0, 0, 0, 0);
+    templateLayout->addWidget(new QLabel("Template:", this));
+    m_templatePathEdit = new QLineEdit(this);
+    templateLayout->addWidget(m_templatePathEdit, 1);
+    m_templateBrowseBtn = new QPushButton("Browse...", this);
+    templateLayout->addWidget(m_templateBrowseBtn);
+    appGroupLayout->addWidget(m_templateContainer);
+    
+    QSettings settings("Graphite Studio", "Graphite DAW");
+    int startupAction = settings.value("StartupAction", 0).toInt();
+    int idx = m_startupActionCombo->findData(startupAction);
+    m_startupActionCombo->setCurrentIndex(idx >= 0 ? idx : 0);
+    m_templatePathEdit->setText(settings.value("TemplatePath", "").toString());
+    
+    m_templateContainer->setVisible(startupAction == 2);
+    
+    connect(m_startupActionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int index) {
+        int action = m_startupActionCombo->itemData(index).toInt();
+        m_templateContainer->setVisible(action == 2);
+    });
+    
+    connect(m_templateBrowseBtn, &QPushButton::clicked, [this]() {
+        QString file = QFileDialog::getOpenFileName(this, "Select Template", "", "Graphite Projects (*.graphite)");
+        if (!file.isEmpty()) {
+            m_templatePathEdit->setText(file);
+        }
+    });
+
+    mainLayout->addWidget(appGroupBox);
 
     // Buttons
     QHBoxLayout* btnLayout = new QHBoxLayout();
@@ -474,6 +521,10 @@ void AudioSettingsDialog::onApplyClicked()
     }
 
     juce::String err = m_deviceManager.setAudioDeviceSetup(setup, true);
+    
+    QSettings settings("Graphite Studio", "Graphite DAW");
+    settings.setValue("StartupAction", m_startupActionCombo->currentData().toInt());
+    settings.setValue("TemplatePath", m_templatePathEdit->text());
     
     if (err.isNotEmpty()) {
         CustomMessageBox::critical(this, "Audio Error", QString::fromStdString(err.toStdString()));
