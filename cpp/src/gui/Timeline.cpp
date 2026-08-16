@@ -836,7 +836,9 @@ void TimelineLanesWidget::dragMoveEvent(QDragMoveEvent* event)
         int trackIndex = event->pos().y() / (trackHeight + trackMargin);
         
         size_t numTracks = m_engine->getTracksSnapshot().size();
-        trackIndex = std::clamp(trackIndex, 0, (int)numTracks - 1);
+        if (trackIndex > (int)numTracks) {
+            trackIndex = (int)numTracks;
+        }
         
         double startTime = std::max(0.0, (double)event->pos().x() / m_pixelsPerSecond);
         
@@ -868,6 +870,25 @@ void TimelineLanesWidget::dropEvent(QDropEvent* event)
         for (const QUrl& url : urlList) {
             if (url.isLocalFile()) {
                 QString filePath = url.toLocalFile();
+                
+                size_t numTracks = m_engine->getTracksSnapshot().size();
+                if (m_draggingTrackIndex >= (int)numTracks) {
+                    dsp::EngineMessage msg;
+                    msg.type = dsp::EngineCommandType::AddTrack;
+                    
+                    // Use filename as track name
+                    std::string filename = filePath.toStdString();
+                    size_t slashPos = filename.find_last_of("/\\");
+                    if (slashPos != std::string::npos) filename = filename.substr(slashPos + 1);
+                    size_t dotPos = filename.find_last_of('.');
+                    if (dotPos != std::string::npos) filename = filename.substr(0, dotPos);
+                    
+                    strncpy(msg.stringValue, filename.c_str(), 255);
+                    msg.stringValue[255] = '\0';
+                    m_engine->sendMessageFromUI(msg);
+                    
+                    m_draggingTrackIndex = (int)numTracks;
+                }
                 
                 // Load it using the pre-calculated position
                 m_engine->loadAudioFileSynchronous(m_draggingTrackIndex, m_previewStartTime, filePath.toStdString());
